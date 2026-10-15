@@ -111,7 +111,7 @@ function speechModelsBox() {
 const OSS = [
   ['Convert Master', 'MIT'], ['Electron', 'MIT'], ['Chromium', 'BSD-3-Clause +'], ['Node.js', 'MIT'],
   ['FFmpeg (ffmpeg-static)', 'GPL-3.0'], ['sharp', 'Apache-2.0'], ['libvips', 'LGPL-3.0'],
-  ['whisper.cpp', 'MIT'], ['Whisper models (OpenAI)', 'MIT'], ['tesseract.js / Tesseract OCR', 'Apache-2.0'], ['extract-zip', 'BSD-2-Clause'],
+  ['whisper.cpp', 'MIT'], ['Whisper models (OpenAI)', 'MIT'], ['tesseract.js / Tesseract OCR', 'Apache-2.0'], ['extract-zip', 'BSD-2-Clause'], ['@napi-rs/keyring', 'MIT'],
 ];
 
 // Bölümlü ayarlar penceresi (Mastertool standardı): Genel · Hesap · Dönüştürme · Konuşma · Depolama · Hakkında

@@ -33,9 +33,14 @@ async function deriveKeys(password, kdf) {
   const pw = Buffer.from(password, 'utf8');
   const master = await pbkdf2(pw, Buffer.from(kdf.salt, 'base64'), kdf.iter, 32);
   const authHash = (await pbkdf2(master, pw, 1, 32)).toString('base64');
-  const encKey = Buffer.from(crypto.hkdfSync('sha256', master, Buffer.alloc(0), Buffer.from('cvm-enc-v1'), 32));
-  master.fill(0);
-  return { authHash, encKey };
+  const encKey = encKeyFromMaster(master);
+  // master yalnız ortak oturum (SSO) kimliğine yazılmak üzere döner; dosyaya ya da günlüğe yazılmaz
+  return { authHash, encKey, master };
+}
+
+// Ortak oturumla şifresiz giren uygulama anahtarını paylaşılan master'dan türetir
+function encKeyFromMaster(master) {
+  return Buffer.from(crypto.hkdfSync('sha256', master, Buffer.alloc(0), Buffer.from('cvm-enc-v1'), 32));
 }
 
 function encryptLibrary(key, obj) {
@@ -135,7 +140,13 @@ async function apiAt(base, method, route, { token, body, timeout = 20000 } = {})
 // ---------------------------------------------------------------------------
 function createAccount(deps) {
   // deps: { userDataDir, appVersion, encrypt, decrypt, getStore, replaceLibrary, persistStore, backupAndClearLibrary,
-  //         onStatus, onSessionExpired, onUpdate }
+  //         onStatus, onSessionExpired, onUpdate, sso, onSharedLogin, onSharedLogout }
+  //
+  // Ortak oturum (SSO, Mastertool sözleşmesi v1 §2): şifreyle giriş ortak kimliği (Windows Kimlik Bilgisi
+  // Yöneticisi) yazar; ortak kimlik varken açılan uygulama /auth/sso ile şifresiz girer. Herhangi bir
+  // Mastertool uygulamasında çıkış ortak kimliği siler ve durum işaretini "out" yapar; diğerleri de kapanır.
+  const sso = deps.sso || null;
+  const ssoRef = (t) => (t ? crypto.createHash('sha256').update(String(t)).digest('base64') : null);
   const file = path.join(deps.userDataDir, 'account.json');
 
   // Kalıcı alanlar (token ve anahtar yalnız "Beni hatırla" seçiliyse ve DPAPI ile şifreli yazılır)
@@ -143,7 +154,7 @@ function createAccount(deps) {
   try { saved = { ...saved, ...JSON.parse(fs.readFileSync(file, 'utf8')) }; } catch { /* ilk açılış */ }
 
   // Oturum (bellekte)
-  let session = null; // { token, user, encKey: Buffer, kdfSalt, syncEnabled }
+  let session = null; // { token, user, encKey: Buffer, kdfSalt, syncEnabled, ssoRef }
   if (saved.token && saved.encKey) {
     try {
       session = {
@@ -152,6 +163,7 @@ function createAccount(deps) {
         user: saved.user,
         kdfSalt: saved.kdfSalt,
         syncEnabled: saved.syncEnabled !== false,
+        ssoRef: saved.ssoRef || null,
       };
     } catch { session = null; }
   }
@@ -166,8 +178,9 @@ function createAccount(deps) {
       out.user = session.user;
       out.kdfSalt = session.kdfSalt;
       out.syncEnabled = session.syncEnabled;
+      out.ssoRef = session.ssoRef || null; // ortak oturumun özeti (sso_token'ın kendisi değil)
     } else {
-      delete out.token; delete out.encKey;
+      delete out.token; delete out.encKey; delete out.ssoRef;
     }
     out.lastSyncAt = status.lastSyncAt;
     out.libraryVersion = status.libraryVersion;
@@ -196,26 +209,69 @@ function createAccount(deps) {
   async function login(email, password, remember) {
     email = String(email || '').trim().toLowerCase();
     const pre = await api('POST', '/api/cv/auth/prelogin', { body: { email } });
-    const { authHash, encKey } = await deriveKeys(password, pre.kdf);
+    let keys = await deriveKeys(password, pre.kdf);
     const res = await api('POST', '/api/cv/auth/login', {
-      body: { email, auth_hash: authHash, device: deviceName(), app_version: String(deps.appVersion).slice(0, 30) },
+      body: { email, auth_hash: keys.authHash, device: deviceName(), app_version: String(deps.appVersion).slice(0, 30), sso: true },
     });
     // Sunucu girişte güncel kdf'yi döner; tuz farklıysa (şifre başka yerde değişmiş) anahtarı yeniden türet
-    let key = encKey;
-    if (res.kdf && res.kdf.salt !== pre.kdf.salt) key = (await deriveKeys(password, res.kdf)).encKey;
+    const kdf = res.kdf || pre.kdf;
+    if (res.kdf && res.kdf.salt !== pre.kdf.salt) keys = await deriveKeys(password, res.kdf);
 
-    // Farklı bir hesapla giriş: bu bilgisayardaki kütüphane başka bir hesaba ait olabilir; birleştirme yerine yedekle
+    const backupFile = beginSession(res, { email, encKey: keys.encKey, kdfSalt: kdf.salt, remember: !!remember, ssoToken: res.sso_token });
+    // Ortak kimliği yaz ve diğer Mastertool uygulamalarına "giriş yapıldı" de
+    if (sso && res.sso_token) {
+      try {
+        sso.writeCredential({ email, user: res.user, sso_token: res.sso_token, master: keys.master, kdf });
+        markShared('in');
+      } catch { /* kimlik deposu kullanılamıyorsa yalnız bu uygulamada oturum açık kalır */ }
+    }
+    keys.master.fill(0);
+    return { backupFile };
+  }
+
+  // Yeni oturumu kur (şifreyle ya da ortak oturumla); farklı hesaba geçişte yerel kütüphaneyi yedekler
+  function beginSession(res, { email, encKey, kdfSalt, remember, ssoToken }) {
     let backupFile = null;
     if (saved.lastUserId && saved.lastUserId !== res.user.id) backupFile = deps.backupAndClearLibrary();
-
-    session = { token: res.token, user: res.user, encKey: key, kdfSalt: (res.kdf || pre.kdf).salt, syncEnabled: res.sync_enabled !== false };
-    saved.email = email;
-    saved.remember = !!remember;
+    session = { token: res.token, user: res.user, encKey, kdfSalt, syncEnabled: res.sync_enabled !== false, ssoRef: ssoRef(ssoToken) };
+    saved.email = email || (res.user && res.user.email) || saved.email;
+    saved.remember = remember;
     saved.lastUserId = res.user.id;
     if (backupFile) { status.libraryVersion = null; status.lastSyncAt = null; }
     persist();
     setStatus({ error: null });
-    return { backupFile };
+    return backupFile;
+  }
+
+  // Ortak kimlikle şifresiz giriş. Dönen: { ok, code, backupFile }
+  async function loginWithShared() {
+    if (!sso) return { ok: false, code: 'no_sso' };
+    const cred = sso.readCredential();
+    if (!cred) return { ok: false, code: 'no_credential' };
+    let res;
+    try {
+      res = await api('POST', '/api/cv/auth/sso', {
+        body: { sso_token: cred.sso_token, device: deviceName(), app_version: String(deps.appVersion).slice(0, 30) }, timeout: 8000,
+      });
+    } catch (e) {
+      // Ortak oturum sunucuda düşmüş: kimliği sil, ailenin geri kalanına da bildir
+      if (e.status === 401) { sso.deleteCredential(); markShared('out'); }
+      return { ok: false, code: e.code || 'error', message: e.message };
+    }
+    const kdf = res.kdf || cred.kdf;
+    // Şifre başka yerde değiştiyse paylaşılan master eski tuzdan türetilmiştir: şifreyle giriş gerekir
+    if (!cred.master || (cred.kdf && kdf && cred.kdf.salt !== kdf.salt)) return { ok: false, code: 'stale_credential' };
+    const master = Buffer.from(cred.master, 'base64');
+    const encKey = encKeyFromMaster(master);
+    master.fill(0);
+    const backupFile = beginSession(res, { email: cred.email, encKey, kdfSalt: kdf && kdf.salt, remember: true, ssoToken: cred.sso_token });
+    return { ok: true, backupFile };
+  }
+
+  // Durum işaretini ilerlet; kendi yazdığımızı izleyicide "görülmüş" say
+  function markShared(state) {
+    if (!sso) return;
+    try { const s = sso.bumpState(state); if (watcher) watcher.seen(s.gen); } catch { /* işaret yazılamadı */ }
   }
 
   async function logout() {
@@ -224,12 +280,61 @@ function createAccount(deps) {
     stopTimers();
     persist();
     setStatus({ state: 'idle', error: null });
-    if (token) api('POST', '/api/cv/auth/logout', { token }).catch(() => {});
+    // Ortak oturum ailede kapanır: kimliği sil, durumu "out" yap (sunucu da sso_ended ile tüm aileyi kapatır)
+    if (sso) { sso.deleteCredential(); markShared('out'); }
+    if (token) await api('POST', '/api/cv/auth/logout', { token, timeout: 8000 }).catch(() => {});
   }
+
+  // Başka bir Mastertool uygulamasında giriş/çıkış: ortak kimliği okuyup karar ver
+  // state: durum işaretindeki "in" / "out" (yoksa okunur). Çağrılar sırayla işlenir.
+  let watcher = null;
+  let syncing = Promise.resolve();
+  function syncShared(state) {
+    syncing = syncing.then(() => doSyncShared(state)).catch(() => {});
+    return syncing;
+  }
+  async function doSyncShared(state) {
+    if (!sso) return;
+    const st = state || sso.readState().state;
+    const cred = sso.readCredential();
+    if (cred) {
+      if (session && session.ssoRef === ssoRef(cred.sso_token)) return; // aynı ortak oturum
+      const r = await loginWithShared();
+      if (r.ok && deps.onSharedLogin) deps.onSharedLogin(r);
+      return;
+    }
+    // Ortak kimlik silinmiş ve işaret "out": ailede çıkış yapıldı. ("in" iken kimlik okunamıyorsa dokunma.)
+    if (st === 'out' && session && deps.onSharedLogout) deps.onSharedLogout();
+  }
+
+  // Açılışta: bu oturum ortak oturumdan geldiyse ve uygulama kapalıyken ailede çıkış yapıldıysa yerelde kapat
+  function sharedEndedWhileClosed() {
+    if (!sso || !session || !session.ssoRef) return false;
+    if (sso.readCredential()) return false;
+    if (sso.readState().state !== 'out') return false;
+    endLocal();
+    return true;
+  }
+
+  // Ana süreç ortak çıkışı uygular (süren dönüştürme bittikten sonra da olabilir); sunucuya çıkış gönderilmez
+  function endLocal(code = 'signed_out_elsewhere') {
+    session = null;
+    stopTimers();
+    persist();
+    setStatus({ state: 'idle', error: code });
+  }
+
+  function watchShared() {
+    if (!sso || watcher) return;
+    watcher = sso.watch((st) => { syncShared(st.state); });
+  }
+  function stopShared() { if (watcher) { watcher.stop(); watcher = null; } }
 
   // Oturum sunucuda geçersiz: 401 session_expired, ya da 403 app_disabled (yönetici bu hesapta
   // Convert Master'ı kapattı) / wrong_app (başka uygulamanın oturumu). Yerel kütüphane korunur.
   function expire(code = 'session_expired') {
+    // Oturum düştüyse ortak kimlik de geçersizdir (şifre değişimi, askıya alma, Oturumlar'dan kapatma)
+    if (code === 'session_expired' && sso) { sso.deleteCredential(); markShared('out'); }
     session = null;
     stopTimers();
     persist();
@@ -486,7 +591,7 @@ function createAccount(deps) {
   return {
     isLoggedIn: () => !!session,
     state: publicState,
-    login, logout, start, syncNow, onLocalChange, setSyncEnabled, deleteRemote, checkUpdate,
+    login, logout, start, syncNow, loginWithShared, syncShared, sharedEndedWhileClosed, watchShared, stopShared, endLocal, onLocalChange, setSyncEnabled, deleteRemote, checkUpdate,
     // testler için
     _merge: merge,
   };
@@ -501,4 +606,4 @@ function compareVersions(a, b) {
   return 0;
 }
 
-module.exports = { createAccount, deriveKeys, encryptLibrary, decryptLibrary, compareVersions, apiBase };
+module.exports = { createAccount, deriveKeys, encKeyFromMaster, encryptLibrary, decryptLibrary, compareVersions, apiBase };

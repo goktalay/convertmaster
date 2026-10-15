@@ -25,6 +25,7 @@ Derlenmiş exe'ler [Releases](https://github.com/goktalay/convertmaster/releases
 - **Resimden metin (OCR):** resim projelerinde isteğe bağlı **"Resimdeki metni oku (OCR)"** seçeneği (varsayılan kapalı; konuşmadan metne de aynı şekilde isteğe bağlıdır — istenmezse hiç çalışmaz, model/dil verisi bile indirilmez). [Tesseract](https://github.com/tesseract-ocr/tesseract) (tesseract.js) ile bu bilgisayarda, çevrimdışı. **Metin (OCR)** panelinde satır no, okuma güveni (%) ve metin; satıra tıklayınca satırın yeri orijinal ve dönüştürülmüş resimde vurgulanır; "Tümünü kopyala"; TXT, CSV, JSON dışa aktarım. 21 dil (Türkçe, İngilizce, Almanca, Fransızca, İspanyolca, Arapça, Rusça, Çince, Japonca, Korece…); projede en çok 6 dil seçilir, her dilin verisi (~2–15 MB) ilk kullanımda bir kez indirilir. Metinsiz resimler "Metin yok" olarak işaretlenir.
 - **Depolama:** tüm dönüştürülmüş dosyalar `%APPDATA%\Convert Master\converted\<proje>\` altında (kaynak klasör yapısıyla) geçici olarak tutulur; kaynak dosyalarınıza dokunulmaz. Proje bazında ya da Ayarlar › Depolama'dan toplu **"Çevrilmiş dosyaları sil"** (isteğe bağlı metinlerle birlikte), önizleme önbelleğini temizleme, model indirme/silme.
 - **Mastertool hesabı:** uygulama Mastertool hesabıyla açılır; "Beni hatırla" (Windows DPAPI), çevrimdışı çalışma, kayıt / şifremi unuttum / hesabım sayfaları.
+- **Ortak oturum (tek giriş):** herhangi bir Mastertool uygulamasında (SSH Master, FTP Masters, SQL Master, Notepad Master, Master Tool) bir kez giriş yapıldıysa Convert Master şifre sormadan açılır; birinde çıkış yapılınca hepsinde çıkış yapılır (yerel projeler ve dönüştürülmüş dosyalar silinmez; süren dönüştürme varsa "şimdi" ya da "bitince" çıkış sorulur). Ortak kimlik Windows Kimlik Bilgisi Yöneticisi'nde (`Mastertool/sso`), durum işareti `%APPDATA%\Mastertool\sso-state.json` dosyasındadır.
 - **Uçtan uca şifreli senkron:** proje tanımları (ad, tür, uzantılar, kaynak türü, ayarlar), proje klasörleri ve genel ayarlar AES-256-GCM ile şifrelenip hesaba yedeklenir; anahtar şifrenizden cihazda türetilir (PBKDF2 + HKDF), sunucu içeriği okuyamaz. Dosyalar, kaynak yolları, seçimler, çıktılar ve metinler her cihazda ayrı kalır; başka cihazda açılan projede kaynak yeniden seçilir.
 - Gece / Gündüz / Sistem teması (varsayılan Sistem); 8 dil: Türkçe, English, Français, Deutsch, Español, العربية (sağdan sola), 中文, Русский; Windows oturumuyla başlatma ve sistem tepsisi; yeni sürüm bildirimi ve Ayarlar › Hakkında › Güncellemeleri denetle.
 
@@ -66,7 +67,7 @@ node test/mock-server.js 8787
 CVM_API=http://127.0.0.1:8787 npm start
 ```
 
-Testler (dönüştürme motoru, senkron, çalıştırıcı, konuşma modülü — whisper taklidiyle —, gerçek Tesseract ile OCR):
+Testler (dönüştürme motoru, senkron, ortak oturum, çalıştırıcı, konuşma modülü — whisper taklidiyle —, gerçek Tesseract ile OCR):
 
 ```bash
 npm test
@@ -104,6 +105,7 @@ Convert Master MIT lisanslıdır. Birlikte dağıtılan bileşenler:
 - **sharp / libvips** — Apache-2.0 / LGPL-3.0.
 - **tesseract.js / Tesseract OCR** — Apache-2.0; dil verileri (tessdata) Apache-2.0.
 - **whisper.cpp** — MIT. **Whisper modelleri** (OpenAI) — MIT; ggml dönüşümleri Hugging Face › ggerganov/whisper.cpp'den indirilir.
+- **@napi-rs/keyring** — MIT (Windows Kimlik Bilgisi Yöneticisi erişimi, ortak oturum).
 - **Electron / Chromium** — MIT ve Chromium lisansları.
 
 ## Bilinen sınırlar

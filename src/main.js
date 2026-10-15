@@ -10,6 +10,7 @@ const I18N = require('./i18n');
 const FORMATS = require('./formats');
 const media = require('./media');
 const { createAccount, apiBase } = require('./account');
+const { createSso } = require('./sso');
 const { ProjectRunner, dirSize } = require('./jobs');
 const { createSpeech, exportTranscript } = require('./speech');
 const { createOcr, exportOcr } = require('./ocr');
@@ -142,7 +143,13 @@ let loginWindow = null;
 let loginNotice = null;
 
 function initAccount() {
+  // Mastertool ortak oturumu: kimlik Windows Kimlik Bilgisi Yöneticisi'nde, durum işareti %APPDATA%\Mastertool altında
+  let sso = null;
+  try { sso = createSso({ stateDir: path.join(app.getPath('appData'), 'Mastertool') }); } catch { sso = null; }
   account = createAccount({
+    sso,
+    onSharedLogin: (r) => enterApp(r.backupFile),
+    onSharedLogout: () => sharedLogout(),
     userDataDir: app.getPath('userData'),
     appVersion: app.getVersion(),
     encrypt,
@@ -182,6 +189,47 @@ function initAccount() {
       showLogin(t(code === 'app_disabled' ? 'auth.errAppDisabled' : code === 'wrong_app' ? 'auth.errWrongApp' : 'auth.errSessionExpired')),
     onUpdate: (info) => mainWindow && mainWindow.webContents.send('app:update', info),
   });
+}
+
+// Giriş tamam (şifreyle ya da ortak oturumla): ana pencereyi aç, giriş penceresini kapat
+function enterApp(backupFile) {
+  loginNotice = null;
+  pendingLogout = false;
+  const fresh = !mainWindow;
+  if (fresh) createMainWindow();
+  if (loginWindow) loginWindow.destroy();
+  if (backupFile) {
+    const send = () => mainWindow && mainWindow.webContents.send('account:backup', backupFile);
+    if (fresh) mainWindow.webContents.once('did-finish-load', send); else send();
+  }
+  if (!fresh) broadcastStore();
+  account.start();
+}
+
+const anyBusy = () => [...runners.values()].some((r) => r.isBusy());
+
+// Başka bir Mastertool uygulamasında çıkış yapıldı. Yerel veriler, projeler ve dönüştürülmüş dosyalar
+// silinmez. Süren dönüştürme varsa kullanıcıya sorulur: şimdi kapat ya da bitince kapat.
+let pendingLogout = false;
+function sharedLogout() {
+  if (pendingLogout) return;
+  account.endLocal('signed_out_elsewhere');
+  const notice = t('auth.signedOutElsewhere');
+  if (!anyBusy()) return showLogin(notice);
+  pendingLogout = true;
+  const parent = BrowserWindow.getFocusedWindow() || mainWindow || undefined;
+  const choice = dialog.showMessageBoxSync(parent, {
+    type: 'question', buttons: [t('auth.logoutNow'), t('auth.logoutWhenDone')], defaultId: 1, cancelId: 1,
+    title: 'Convert Master', message: notice, detail: t('auth.logoutBusy'),
+  });
+  if (choice === 0) { pendingLogout = false; return showLogin(notice); }
+  const timer = setInterval(() => {
+    if (!pendingLogout) return clearInterval(timer); // bu arada yeniden giriş yapıldı
+    if (anyBusy()) return;
+    clearInterval(timer);
+    pendingLogout = false;
+    showLogin(notice);
+  }, 2000);
 }
 
 // ---------------------------------------------------------------------------
@@ -277,9 +325,13 @@ function destroyTray() {
   if (tray) { tray.destroy(); tray = null; }
 }
 
+// Tepsiden, Master Tool tepsi uygulamasından ya da ikinci kez çalıştırılınca: gizli/simge durumundaki pencereyi göster
 function showMainWindow() {
-  if (!account || !account.isLoggedIn()) {
-    if (loginWindow) loginWindow.focus(); else showLogin();
+  if (!account || (!account.isLoggedIn() && !pendingLogout)) {
+    if (!loginWindow) return showLogin(loginNotice);
+    if (loginWindow.isMinimized()) loginWindow.restore();
+    loginWindow.show();
+    loginWindow.focus();
     return;
   }
   if (!mainWindow) createMainWindow();
@@ -491,19 +543,23 @@ ipcMain.handle('account:state', () => ({ ...account.state(), notice: loginNotice
 ipcMain.handle('account:login', async (_e, { email, password, remember }) => {
   try {
     const { backupFile } = await account.login(email, password, remember);
-    loginNotice = null;
-    if (!mainWindow) createMainWindow();
-    if (loginWindow) loginWindow.destroy();
-    if (backupFile) mainWindow.webContents.once('did-finish-load', () => mainWindow.webContents.send('account:backup', backupFile));
-    account.start();
+    enterApp(backupFile);
     return { ok: true };
   } catch (e) {
     return { ok: false, code: e.code || 'error', message: e.message };
   }
 });
 
-ipcMain.handle('account:logout', async () => {
-  await account.logout();
+ipcMain.handle('account:logout', async (event) => {
+  if (anyBusy()) {
+    const choice = dialog.showMessageBoxSync(BrowserWindow.fromWebContents(event.sender) || undefined, {
+      type: 'question', buttons: [t('acct.logout'), t('common.cancel')], defaultId: 1, cancelId: 1,
+      title: 'Convert Master', message: t('auth.logoutBusy'),
+    });
+    if (choice !== 0) return;
+  }
+  pendingLogout = false;
+  await account.logout(); // ortak kimliği siler: diğer Mastertool uygulamalarında da çıkış yapılır
   showLogin();
 });
 ipcMain.handle('account:syncNow', () => account.syncNow());
@@ -1015,7 +1071,7 @@ if (!gotLock) {
   app.on('second-instance', showMainWindow);
   app.on('before-quit', () => (isQuitting = true));
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     registerMediaProtocol();
     loadStore();
     speech = createSpeech({
@@ -1029,10 +1085,21 @@ if (!gotLock) {
     cleanupCache().catch(() => {});
     // Uygulama girişsiz açılmaz. "Beni hatırla" ile saklı oturum varsa doğrudan açılır
     // (çevrimdışıyken yerel kütüphaneyle), oturum sunucuda düşmüşse giriş ekranına dönülür.
+    // Uygulama kapalıyken başka bir Mastertool uygulamasında çıkış yapıldıysa bu oturum da kapanır
+    if (account.sharedEndedWhileClosed()) loginNotice = t('auth.signedOutElsewhere');
+    // Kendi oturumu yoksa ortak oturumla (başka bir Mastertool uygulamasında giriş yapılmış) şifresiz gir
+    let backupFile = null;
+    if (!account.isLoggedIn()) {
+      const r = await account.loginWithShared();
+      if (r.ok) backupFile = r.backupFile;
+      else if (r.code === 'app_disabled') loginNotice = t('auth.errAppDisabled');
+    }
+    account.watchShared();
     if (account.isLoggedIn()) {
       createMainWindow();
       // Windows oturumuyla başlatıldıysa ve tepsiye küçültme açıksa doğrudan tepside başla
       if (process.argv.includes('--hidden') && store.settings.minimizeToTray) mainWindow.once('ready-to-show', () => hideToTray());
+      if (backupFile) mainWindow.webContents.once('did-finish-load', () => mainWindow && mainWindow.webContents.send('account:backup', backupFile));
       account.start();
     } else {
       createLoginWindow();
@@ -1042,6 +1109,7 @@ if (!gotLock) {
 
   app.on('window-all-closed', () => {
     destroyTray();
+    if (account) account.stopShared();
     if (ocr) ocr.close();
     for (const r of runners.values()) r.close();
     if (saveTimer) { clearTimeout(saveTimer); writeStore(); }
