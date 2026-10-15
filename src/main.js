@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, safeStorage, shell, dialog, nativeTheme, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell, dialog, nativeTheme, protocol, net, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -51,8 +51,11 @@ const defaultStore = () => ({
   local: {},     // cihaza özgü: projeId -> { sourcePath, unchecked: [rel] }
   syncMeta: {},  // senkron: öğe id -> { kind, hash, updated_at, rev, device, deleted }
   settings: {
-    appTheme: 'dark',        // 'dark' | 'light' | 'system'
+    appTheme: 'system',      // 'dark' | 'light' | 'system'
     language: null,          // null = sistem dili
+    openAtLogin: false,      // Windows oturumu açılınca başlat (cihaza özgü)
+    minimizeToTray: false,   // küçültülünce sistem tepsisine gizle
+    closeToTray: false,      // kapat (X) ana pencereyi tepsiye gizler
     defaultConcurrency: 2,   // yeni projelerde aynı anda çevrilecek dosya sayısı
     speechModel: 'base',     // yeni projelerde konuşma modeli
     speechConcurrency: 1,    // aynı anda metne çevrilecek dosya (whisper işlemciyi yoğun kullanır)
@@ -83,7 +86,7 @@ function loadStore() {
 
 function applyAppTheme() {
   const v = store.settings.appTheme;
-  nativeTheme.themeSource = v === 'light' || v === 'system' ? v : 'dark';
+  nativeTheme.themeSource = v === 'dark' || v === 'light' ? v : 'system';
 }
 const windowBg = () => (nativeTheme.shouldUseDarkColors ? '#0b0f17' : '#eef2f7');
 
@@ -123,6 +126,7 @@ function publicStore() {
 }
 
 function broadcastStore() {
+  if (tray) tray.setContextMenu(buildTrayMenu());
   const data = publicStore();
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('store:changed', data);
 }
@@ -199,6 +203,7 @@ function showLogin(notice) {
   loginNotice = notice || null;
   if (!loginWindow) createLoginWindow();
   else loginWindow.focus();
+  destroyTray();
   for (const r of runners.values()) r.close();
   runners.clear();
   for (const w of BrowserWindow.getAllWindows()) if (w !== loginWindow) { w.forceClose = true; w.destroy(); }
@@ -213,7 +218,60 @@ function createMainWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.on('minimize', (e) => {
+    if (!store.settings.minimizeToTray) return;
+    e.preventDefault();
+    hideToTray();
+  });
+  mainWindow.on('close', (e) => {
+    if (store.settings.closeToTray && !isQuitting) {
+      e.preventDefault();
+      hideToTray();
+    }
+  });
+  mainWindow.on('show', destroyTray);
   mainWindow.on('closed', () => (mainWindow = null));
+}
+
+// ---------------------------------------------------------------------------
+// Sistem tepsisi
+// ---------------------------------------------------------------------------
+let tray = null;
+let isQuitting = false;
+
+function hideToTray() {
+  ensureTray();
+  mainWindow.hide();
+  if (!store.settings.trayHintShown) {
+    store.settings.trayHintShown = true;
+    saveStore({ sync: false });
+    tray.displayBalloon({ iconType: 'info', title: t('main.balloonTitle'), content: t('main.balloonBody') });
+  }
+}
+
+function buildTrayMenu() {
+  const projects = store.projects.slice().sort((a, b) => a.name.localeCompare(b.name, currentLang()))
+    .map((p) => ({ label: p.name, click: () => openProjectWindow(p.id) }));
+  return Menu.buildFromTemplate([
+    { label: t('main.trayShow'), click: showMainWindow },
+    { type: 'separator' },
+    { label: t('main.trayProjects'), submenu: projects.length ? projects : [{ label: t('main.trayNone'), enabled: false }] },
+    { type: 'separator' },
+    { label: t('main.trayQuit'), click: () => { isQuitting = true; app.quit(); } },
+  ]);
+}
+
+function ensureTray() {
+  if (tray) { tray.setContextMenu(buildTrayMenu()); return; }
+  tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16, quality: 'best' }));
+  tray.setToolTip('Convert Master');
+  tray.setContextMenu(buildTrayMenu());
+  tray.on('click', showMainWindow);
+  tray.on('double-click', showMainWindow);
+}
+
+function destroyTray() {
+  if (tray) { tray.destroy(); tray = null; }
 }
 
 function showMainWindow() {
@@ -461,8 +519,38 @@ ipcMain.handle('app:openMastertool', () => {
 ipcMain.handle('account:openWeb', (_e, page) => {
   const allowed = { forgot: '/sifremi-unuttum', register: '/kayit', account: '/hesabim' };
   if (!allowed[page]) return;
-  const base = apiBase();
-  shell.openExternal(base + allowed[page] + (base.includes('mastertool.download') ? '?app=cv' : ''));
+  // Mastertool standardı: hesap sayfaları uygulamanın diliyle ve o anki temasıyla açılır
+  const q = new URLSearchParams({ lang: currentLang(), theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', app: 'cv' });
+  shell.openExternal(`${apiBase()}${allowed[page]}?${q}`);
+});
+
+// Windows oturumu açılınca başlat (yalnız paketlenmiş uygulamada; geliştirmede electron.exe kaydedilmesin)
+function applyOpenAtLogin() {
+  if (!app.isPackaged) return;
+  app.setLoginItemSettings({ openAtLogin: !!store.settings.openAtLogin, args: ['--hidden'] });
+}
+
+ipcMain.handle('app:about', () => ({
+  version: app.getVersion(),
+  electron: process.versions.electron,
+  chrome: process.versions.chrome,
+  ffmpeg: String((require('ffmpeg-static/package.json')['ffmpeg-static'] || {})['binary-release-tag'] || '').replace(/^b/, ''),
+  openAtLogin: app.isPackaged ? app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin : !!store.settings.openAtLogin,
+}));
+
+ipcMain.handle('app:checkUpdate', async () => {
+  try {
+    return { ok: true, ...(await account.checkUpdate({ manual: true })) };
+  } catch (e) {
+    return { ok: false, code: e.code || 'error', message: e.message };
+  }
+});
+
+// Chromium/Electron lisans dosyaları kurulum klasöründe durur
+ipcMain.handle('app:openLicenses', () => {
+  const file = path.join(path.dirname(process.execPath), 'LICENSES.chromium.html');
+  if (fs.existsSync(file)) return shell.openPath(file);
+  return shell.openExternal('https://www.electronjs.org/docs/latest#license');
 });
 ipcMain.on('app:lang', (e) => { e.returnValue = currentLang(); });
 ipcMain.on('app:version', (e) => { e.returnValue = app.getVersion(); });
@@ -630,20 +718,22 @@ ipcMain.handle('folder:delete', (_e, id) => {
 });
 
 // Görünüm ayarları (panel boyutları vb.) sessizce kaydedilir, yayınlanmaz ve senkronlanmaz
-const QUIET_SETTINGS = ['previewHeight', 'treeWidth', 'transcriptWidth', 'linkPreview'];
+const QUIET_SETTINGS = ['previewHeight', 'treeWidth', 'transcriptWidth', 'linkPreview', 'openAtLogin', 'minimizeToTray', 'closeToTray', 'trayHintShown'];
 
 ipcMain.handle('settings:set', (_e, patch) => {
   Object.assign(store.settings, patch);
   const loud = Object.keys(patch).some((k) => !QUIET_SETTINGS.includes(k));
   saveStore({ sync: loud });
   if ('appTheme' in patch) applyAppTheme();
+  if ('openAtLogin' in patch) applyOpenAtLogin();
   if ('language' in patch) {
     applyLanguage();
+    if (tray) tray.setContextMenu(buildTrayMenu());
     if (mainWindow) mainWindow.webContents.reload();
     if (loginWindow) loginWindow.webContents.reload();
     return;
   }
-  if (loud) broadcastStore();
+  if (loud || ['minimizeToTray', 'closeToTray'].some((k) => k in patch)) broadcastStore();
   if ('speechConcurrency' in patch) for (const r of runners.values()) r.pump();
 });
 
@@ -889,6 +979,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', showMainWindow);
+  app.on('before-quit', () => (isQuitting = true));
 
   app.whenReady().then(() => {
     registerMediaProtocol();
@@ -905,6 +996,8 @@ if (!gotLock) {
     // (çevrimdışıyken yerel kütüphaneyle), oturum sunucuda düşmüşse giriş ekranına dönülür.
     if (account.isLoggedIn()) {
       createMainWindow();
+      // Windows oturumuyla başlatıldıysa ve tepsiye küçültme açıksa doğrudan tepside başla
+      if (process.argv.includes('--hidden') && store.settings.minimizeToTray) mainWindow.once('ready-to-show', () => hideToTray());
       account.start();
     } else {
       createLoginWindow();
@@ -913,6 +1006,7 @@ if (!gotLock) {
   });
 
   app.on('window-all-closed', () => {
+    destroyTray();
     for (const r of runners.values()) r.close();
     if (saveTimer) { clearTimeout(saveTimer); writeStore(); }
     app.quit();

@@ -37,7 +37,7 @@ async function logout() {
 function themeButton(btn, getSettings) {
   const paint = () => {
     const s = getSettings();
-    const dark = (s.appTheme || 'dark') !== 'light' && !(s.appTheme === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
+    const dark = (s.appTheme || 'system') !== 'light' && !(s.appTheme === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
     btn.innerHTML = icon(dark ? 'sun' : 'moon');
     btn.title = dark ? t('set.toLight') : t('set.toDark');
   };
@@ -107,56 +107,115 @@ function speechModelsBox() {
   return box;
 }
 
-async function openSettings(s) {
-  let appTheme = s.appTheme || 'dark';
+// Hakkında › açık kaynak bileşenleri
+const OSS = [
+  ['Convert Master', 'MIT'], ['Electron', 'MIT'], ['Chromium', 'BSD-3-Clause +'], ['Node.js', 'MIT'],
+  ['FFmpeg (ffmpeg-static)', 'GPL-3.0'], ['sharp', 'Apache-2.0'], ['libvips', 'LGPL-3.0'],
+  ['whisper.cpp', 'MIT'], ['Whisper models (OpenAI)', 'MIT'], ['extract-zip', 'BSD-2-Clause'],
+];
+
+// Bölümlü ayarlar penceresi (Mastertool standardı): Genel · Hesap · Dönüştürme · Konuşma · Depolama · Hakkında
+async function openSettings(s, startTab = 'general') {
+  let appTheme = s.appTheme || 'system';
+  const about = await window.api.about();
   const langOptions = Object.entries(I18N.LANGUAGES)
     .map(([code, l]) => `<option value="${code}" ${code === LANG ? 'selected' : ''}>${esc(l.name)}</option>`).join('');
-  const body = h(`<div style="display:grid;gap:16px">
-    <div class="section-title" style="margin:0">${esc(t('acct.section'))}</div>
-    <div class="acct-box">
-      <div class="acct-who">${icon('user')}<span>${esc(t('acct.signedInAs', { email: (acct.user && acct.user.email) || acct.email || '' }))}</span></div>
-      <label class="check"><input type="checkbox" id="s-sync" ${acct.syncEnabled ? 'checked' : ''}>
-        <span>${esc(t('acct.syncToggle'))}<small>${esc(t('acct.syncHint'))}</small></span></label>
-      <div class="acct-status">${icon('cloud')}<span id="acct-status">${esc(syncText(acct))}</span></div>
-      <div class="acct-actions">
-        <button class="btn sm" type="button" id="s-syncnow">${icon('refresh')}${esc(t('acct.syncNow'))}</button>
-        <button class="btn sm" type="button" id="s-delremote">${icon('trash')}${esc(t('acct.deleteRemote'))}</button>
-        <button class="btn sm" type="button" id="s-web">${icon('open')}${esc(t('acct.myAccount'))}</button>
-        <span style="flex:1"></span>
-        <button class="btn sm danger" type="button" id="s-logout">${icon('logout')}${esc(t('acct.logout'))}</button>
-      </div>
+  const tabs = [
+    ['general', 'gear', t('set.general')],
+    ['account', 'user', t('set.account')],
+    ['conversion', 'layers', t('set.conversion')],
+    ['speech', 'mic', t('set.speech')],
+    ['storage', 'hdd', t('set.storage')],
+    ['about', 'bolt', t('set.about')],
+  ];
+  const email = (acct.user && acct.user.email) || acct.email || '';
+  const body = h(`<div class="set-wrap">
+    <nav class="set-nav">${tabs.map(([k, ic, label]) => `<button type="button" data-tab="${k}">${icon(ic)}<span>${esc(label)}</span></button>`).join('')}</nav>
+    <div class="set-pages">
+      <section data-page="general">
+        <div class="field"><label>${esc(t('set.language'))}</label><select class="input" id="s-lang">${langOptions}</select>
+          <small class="set-hint">${esc(t('set.languageHint'))}</small></div>
+        <div class="field"><label>${esc(t('set.theme'))}</label>
+          <div class="seg" id="s-theme">
+            <button type="button" data-v="dark">${icon('moon')}${esc(t('set.themeDark'))}</button>
+            <button type="button" data-v="light">${icon('sun')}${esc(t('set.themeLight'))}</button>
+            <button type="button" data-v="system">${icon('monitor')}${esc(t('set.themeSystem'))}</button>
+          </div></div>
+        <div class="section-title">${esc(t('set.startup'))}</div>
+        <label class="check"><input type="checkbox" id="s-login" ${about.openAtLogin ? 'checked' : ''}>
+          <span>${esc(t('set.openAtLogin'))}<small>${esc(t('set.openAtLoginHint'))}</small></span></label>
+        <label class="check"><input type="checkbox" id="s-min" ${s.minimizeToTray ? 'checked' : ''}>
+          <span>${esc(t('set.minTray'))}<small>${esc(t('set.minTrayHint'))}</small></span></label>
+        <label class="check"><input type="checkbox" id="s-close" ${s.closeToTray ? 'checked' : ''}>
+          <span>${esc(t('set.closeTray'))}<small>${esc(t('set.closeTrayHint'))}</small></span></label>
+      </section>
+
+      <section data-page="account">
+        <div class="acct-box">
+          <div class="acct-who">${icon('user')}<span>${esc(t('acct.signedInAs', { email }))}</span></div>
+          <label class="check"><input type="checkbox" id="s-sync" ${acct.syncEnabled ? 'checked' : ''}>
+            <span>${esc(t('acct.syncToggle'))}<small>${esc(t('acct.syncHint'))}</small></span></label>
+          <div class="acct-status">${icon('cloud')}<span id="acct-status">${esc(syncText(acct))}</span></div>
+          <div class="acct-actions">
+            <button class="btn sm" type="button" id="s-syncnow">${icon('refresh')}${esc(t('acct.syncNow'))}</button>
+            <button class="btn sm" type="button" id="s-delremote">${icon('trash')}${esc(t('acct.deleteRemote'))}</button>
+          </div>
+          <div class="acct-actions">
+            <button class="btn sm" type="button" id="s-web">${icon('open')}${esc(t('acct.myAccount'))}</button>
+            <span style="flex:1"></span>
+            <button class="btn sm danger" type="button" id="s-logout">${icon('logout')}${esc(t('acct.logout'))}</button>
+          </div>
+        </div>
+      </section>
+
+      <section data-page="conversion">
+        <div class="field"><label>${esc(t('set.defaultConcurrency'))}</label><input class="input" id="s-conc" type="number" min="1" max="32" value="${esc(s.defaultConcurrency || 2)}" style="max-width:160px">
+          <small class="set-hint">${esc(t('set.defaultConcurrencyHint'))}</small></div>
+        <div class="field"><label>${esc(t('set.speechConcurrency'))}</label><input class="input" id="s-sconc" type="number" min="1" max="4" value="${esc(s.speechConcurrency || 1)}" style="max-width:160px">
+          <small class="set-hint">${esc(t('set.speechConcurrencyHint'))}</small></div>
+      </section>
+
+      <section data-page="speech">
+        <div class="field"><label>${esc(t('set.speechModel'))}</label>
+          <select class="input" id="s-model">${options(Object.keys(FORMATS.SPEECH_MODELS).map((k) => [k, modelLabel(k)]), s.speechModel || 'base')}</select></div>
+        <div class="section-title">${esc(t('pf.models'))}</div>
+        <div id="s-models"></div>
+        <small class="set-hint">${esc(t('pf.speechNote'))}</small>
+      </section>
+
+      <section data-page="storage">
+        <div class="storage" id="s-storage"><div class="empty-note">…</div></div>
+      </section>
+
+      <section data-page="about">
+        <div class="about-head">
+          <img src="../../build/icon.png" alt="">
+          <div><div class="about-name">Convert Master</div>
+            <div class="about-ver">${esc(t('about.version', { version: about.version }))}</div></div>
+        </div>
+        <div class="set-hint">${esc(t('about.family'))}</div>
+        <div class="acct-actions">
+          <button class="btn sm" type="button" id="s-update">${icon('refresh')}${esc(t('about.checkUpdate'))}</button>
+          <span class="about-update" id="s-update-result"></span>
+        </div>
+        <div class="section-title">${esc(t('about.licenses'))}</div>
+        <div class="set-hint">${esc(t('about.licensesIntro'))}</div>
+        <ul class="oss">${OSS.map(([n, l]) => `<li><span>${esc(n)}</span><span>${esc(l)}</span></li>`).join('')}</ul>
+        <div class="acct-actions">
+          <button class="btn sm" type="button" id="s-licenses">${icon('file')}${esc(t('about.chromium'))}</button>
+          <span class="set-hint">Electron ${esc(about.electron)} · Chromium ${esc(about.chrome)}${about.ffmpeg ? ` · FFmpeg ${esc(about.ffmpeg)}` : ''}</span>
+        </div>
+      </section>
     </div>
-
-    <div class="section-title" style="margin:6px 0 0">${esc(t('set.appearance'))}</div>
-    <div class="row c-1-1">
-      <div class="field"><label>${esc(t('set.theme'))}</label>
-        <div class="seg" id="s-theme">
-          <button data-v="dark">${icon('moon')}${esc(t('set.themeDark'))}</button>
-          <button data-v="light">${icon('sun')}${esc(t('set.themeLight'))}</button>
-          <button data-v="system">${icon('monitor')}${esc(t('set.themeSystem'))}</button>
-        </div></div>
-      <div class="field"><label>${esc(t('set.language'))}</label><select class="input" id="s-lang">${langOptions}</select></div>
-    </div>
-
-    <div class="section-title" style="margin:6px 0 0">${esc(t('set.conversion'))}</div>
-    <div class="row c-1-1">
-      <div class="field"><label>${esc(t('set.defaultConcurrency'))}</label><input class="input" id="s-conc" type="number" min="1" max="32" value="${esc(s.defaultConcurrency || 2)}">
-        <small class="hint">${esc(t('set.defaultConcurrencyHint'))}</small></div>
-      <div class="field"><label>${esc(t('set.speechConcurrency'))}</label><input class="input" id="s-sconc" type="number" min="1" max="4" value="${esc(s.speechConcurrency || 1)}">
-        <small class="hint">${esc(t('set.speechConcurrencyHint'))}</small></div>
-    </div>
-
-    <div class="section-title" style="margin:6px 0 0">${esc(t('set.speech'))}</div>
-    <div class="field"><label>${esc(t('set.speechModel'))}</label>
-      <select class="input" id="s-model">${options(Object.keys(FORMATS.SPEECH_MODELS).map((k) => [k, modelLabel(k)]), s.speechModel || 'base')}</select></div>
-    <div id="s-models"></div>
-
-    <div class="section-title" style="margin:6px 0 0">${esc(t('set.storage'))}</div>
-    <div class="storage" id="s-storage"><div class="empty-note">…</div></div>
-    <div class="about">${icon('info')} Convert Master ${esc(window.api.version || '')}</div>
   </div>`);
 
   const q = (sel) => body.querySelector(sel);
+  const showTab = (k) => {
+    body.querySelectorAll('.set-nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === k));
+    body.querySelectorAll('.set-pages section').forEach((p) => p.classList.toggle('hidden', p.dataset.page !== k));
+  };
+  body.querySelectorAll('.set-nav button').forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+  showTab(startTab);
   q('#s-models').replaceWith(speechModelsBox());
 
   // Depolama: boyutlar ve temizlik (anında uygulanır)
@@ -171,6 +230,7 @@ async function openSettings(s) {
         <span></span><button class="btn sm ghost danger" data-a="clear-cache" ${info.cache ? '' : 'disabled'}>${icon('broom')}${esc(t('set.clearCache'))}</button></div>
       <div class="st-row">${icon('mic')}<span>${esc(t('set.models'))}</span><b>${formatSize(info.models)}</b>
         <button class="btn sm ghost" data-a="open-models">${icon('folder')}${esc(t('common.open'))}</button><span></span></div>
+      <div class="set-hint">${esc(t('set.storageHint'))}</div>
       <div class="hint st-path">${esc(info.dir)}</div>`;
     el.querySelector('[data-a="open-converted"]').onclick = () => window.api.openStorage('converted');
     el.querySelector('[data-a="open-models"]').onclick = () => window.api.openStorage('models');
@@ -185,22 +245,8 @@ async function openSettings(s) {
   };
   paintStorage();
 
-  q('#s-sync').onchange = async (e) => {
-    const on = e.target.checked;
-    const r = await window.api.setSyncEnabled(on);
-    if (!r.ok) { e.target.checked = !on; toast(t('sync.error', { msg: r.code }), { type: 'err' }); }
-  };
-  q('#s-syncnow').onclick = () => window.api.syncNow();
-  q('#s-web').onclick = () => window.api.openWeb('account');
-  q('#s-delremote').onclick = async () => {
-    const ok = await confirmBox(t('acct.deleteRemote'), esc(t('acct.deleteRemoteMsg')));
-    if (!ok) return;
-    const r = await window.api.deleteRemoteLibrary();
-    if (r.ok) { q('#s-sync').checked = false; toast(t('acct.deleteRemoteDone'), { type: 'ok' }); }
-    else toast(t('sync.error', { msg: r.code }), { type: 'err' });
-  };
-  q('#s-logout').onclick = logout;
-
+  // Tema seçimi anında uygulanır (önizleme); İptal edilirse eski temaya döner
+  const originalTheme = appTheme;
   const setTheme = (v) => {
     appTheme = v;
     body.querySelectorAll('#s-theme button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
@@ -208,11 +254,39 @@ async function openSettings(s) {
   };
   body.querySelectorAll('#s-theme button').forEach((b) => (b.onclick = () => setTheme(b.dataset.v)));
   body.querySelectorAll('#s-theme button').forEach((b) => b.classList.toggle('on', b.dataset.v === appTheme));
-  const originalTheme = appTheme;
+
+  // Hesap bölümündeki işlemler anında uygulanır (Kaydet beklemez)
+  q('#s-sync').onchange = async (e) => {
+    const on = e.target.checked;
+    const r = await window.api.setSyncEnabled(on);
+    if (!r.ok) { e.target.checked = !on; toast(t('sync.error', { msg: r.code }), { type: 'err' }); }
+  };
+  q('#s-syncnow').onclick = () => window.api.syncNow();
+  q('#s-delremote').onclick = async () => {
+    const ok = await confirmBox(t('acct.deleteRemote'), esc(t('acct.deleteRemoteMsg')));
+    if (!ok) return;
+    const r = await window.api.deleteRemoteLibrary();
+    if (r.ok) { q('#s-sync').checked = false; toast(t('acct.deleteRemoteDone'), { type: 'ok' }); }
+    else toast(t('sync.error', { msg: r.code }), { type: 'err' });
+  };
+  q('#s-web').onclick = () => window.api.openWeb('account');
+  q('#s-logout').onclick = logout;
+
+  // Hakkında: yeni sürüm denetimi ve lisanslar
+  q('#s-update').onclick = async () => {
+    const out = q('#s-update-result');
+    out.className = 'about-update';
+    out.textContent = t('about.checking');
+    const r = await window.api.checkUpdate();
+    if (!r.ok) { out.classList.add('err'); out.textContent = t('about.checkFailed', { msg: r.message || r.code }); return; }
+    if (r.newer) { out.classList.add('new'); out.textContent = `${t('update.available', { version: r.latest })} — ${t('update.hint')}`; }
+    else { out.classList.add('ok'); out.textContent = t('about.upToDate'); }
+  };
+  q('#s-licenses').onclick = () => window.api.openLicenses();
 
   const clamp = (v, min, max, def) => { const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : def; };
   const res = await openModal({
-    title: t('set.title'), iconName: 'gear', width: 640, body,
+    title: t('set.title'), iconName: 'gear', width: 760, body,
     buttons: [
       { label: t('common.cancel'), value: null },
       {
@@ -220,6 +294,9 @@ async function openSettings(s) {
         onClick: () => ({
           appTheme,
           language: q('#s-lang').value,
+          openAtLogin: q('#s-login').checked,
+          minimizeToTray: q('#s-min').checked,
+          closeToTray: q('#s-close').checked,
           defaultConcurrency: clamp(q('#s-conc').value, 1, 32, 2),
           speechConcurrency: clamp(q('#s-sconc').value, 1, 4, 1),
           speechModel: q('#s-model').value,
@@ -232,7 +309,7 @@ async function openSettings(s) {
     return null;
   }
   const langChanged = res.language !== LANG;
-  if (!langChanged) delete res.language;
+  if (!langChanged) delete res.language; // dil değişmediyse pencereyi yeniden yükleme
   await window.api.setSettings(res);
   if (!langChanged) toast(t('set.saved'), { type: 'ok' });
   return res;
