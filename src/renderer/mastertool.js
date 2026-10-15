@@ -4,7 +4,7 @@
 // Adres (dil ve gece/gündüz teması) ana süreçte kurulur; işaretleme web siteleriyle birebir aynıdır.
 
 function mastertoolButton() {
-  const a = h(`<a class="mtk-mt" href="https://mastertool.download/" title="Mastertool — SSH Master · FTP Masters · SQL Master">
+  const a = h(`<a class="mtk-mt" href="https://mastertool.download/" title="Mastertool — SSH Master · FTP Masters · SQL Master · Notepad Master · Convert Master">
     <span class="mtk-mt-in">
       <svg class="mtk-mt-ic" viewBox="0 0 32 32" aria-hidden="true">
         <defs><linearGradient id="mtkg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>

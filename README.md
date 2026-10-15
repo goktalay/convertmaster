@@ -6,7 +6,7 @@ Windows için video, resim ve ses dönüştürücü; isteğe bağlı olarak konu
 
 Derlenmiş exe'ler [Releases](https://github.com/goktalay/convertmaster/releases) sayfasındadır ve [convertmaster.app](https://convertmaster.app) hesabınızdan indirilir:
 
-- `Convert-Master-Setup-x.y.z.exe` — kurulum (varsayılan klasör `C:\Program Files\Mastertool\Convert Master`, Başlat menüsü › Mastertool › Convert Master)
+- `Convert-Master-Setup-x.y.z.exe` — kurulum (varsayılan klasör `C:\Program Files\Mastertool\Convert Master`, Başlat menüsü › Master Tool › Convert Master)
 - `Convert-Master-Portable-x.y.z.exe` — kurulumsuz, tek dosya
 
 ## Özellikler
