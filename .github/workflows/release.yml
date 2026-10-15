@@ -1,12 +1,19 @@
 # Windows exe'lerini derler.
 # - "v1.2.3" gibi bir etiket gönderilince: sürümü etiketten alır, derler ve GitHub Release'e ekler.
 # - Actions sekmesinden elle çalıştırılınca (workflow_dispatch): yalnızca derler, exe'leri "artifact" olarak saklar.
+#   "release" işaretlenirse package.json'daki sürümle v<sürüm> etiketini ve Release'i oluşturur, convertmaster.app'e yükler
+#   (etiket gönderilemeyen ortamlar için; etiketle yayınla aynı sonuç).
 name: Release
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Yayınla (v<package.json sürümü> etiketi + Release + convertmaster.app)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -14,6 +21,9 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    env:
+      # Etiketle ya da "release" işaretli elle çalıştırmada yayınlanır
+      PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.release == true }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +38,12 @@ jobs:
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
 
       - run: npm ci
+
+      - name: Yayın etiketi
+        id: tag
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "name=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"; else echo "name=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"; fi
 
       - name: Testler
         run: npm test
@@ -50,9 +66,11 @@ jobs:
           retention-days: 14
 
       - name: Release'e ekle
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.PUBLISH == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          target_commitish: ${{ github.sha }}
           files: dist/*.exe
           generate_release_notes: true
 
@@ -60,10 +78,13 @@ jobs:
       # Anahtar depo secret'ı CONVERTM_RELEASE_KEY'dedir; tanımlı değilse adım atlanır.
       # Ayrıntılar scripts/upload-convertmaster.sh.
       - name: convertmaster.app'e yükle
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.PUBLISH == 'true'
         shell: bash
         env:
           CONVERTM_RELEASE_KEY: ${{ secrets.CONVERTM_RELEASE_KEY }}
         run: |
-          V="${GITHUB_REF_NAME#v}"
-          bash scripts/upload-convertmaster.sh "$V" "dist/Convert-Master-Setup-$V.exe" "$(git for-each-ref --format='%(contents)' "refs/tags/$GITHUB_REF_NAME")" "dist/Convert-Master-Portable-$V.exe"
+          T="${{ steps.tag.outputs.name }}"
+          V="${T#v}"
+          NOTES="$(git for-each-ref --format='%(contents)' "refs/tags/$T" 2>/dev/null)"
+          [ -n "$NOTES" ] || NOTES="Convert Master $V — video/resim/ses dönüştürme, çevrimdışı konuşmadan metne, 8 dil."
+          bash scripts/upload-convertmaster.sh "$V" "dist/Convert-Master-Setup-$V.exe" "$NOTES" "dist/Convert-Master-Portable-$V.exe"
