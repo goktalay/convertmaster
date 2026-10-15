@@ -117,3 +117,4 @@
 .acct-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 @media (max-width: 720px) { .set-wrap { grid-template-columns: 1fr; } .set-nav { flex-direction: row; flex-wrap: wrap; border: none; padding: 0; } }
 .login-mt { position: fixed; top: 12px; inset-inline-end: 12px; }
+[dir="rtl"] .ext-chips, [dir="rtl"] .src-pick .input, [dir="rtl"] .st-path { direction: ltr; }

@@ -251,3 +251,6 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 @keyframes spin { to { transform: rotate(360deg); } }
 
 [dir="rtl"] .pj-src, [dir="rtl"] .lrow .dir, [dir="rtl"] .pv-name { direction: ltr; text-align: right; }
+/* Arapça: dosya yolları, uzantılar ve metin dökümü (saniye · dil · metin) soldan sağa kalır */
+[dir="rtl"] .tr-head, [dir="rtl"] .tr-row, [dir="rtl"] .pj-conv, [dir="rtl"] .lrow .nm, [dir="rtl"] .trow .tn, [dir="rtl"] .pv-info { direction: ltr; }
+[dir="rtl"] .tr-head, [dir="rtl"] .tr-row { text-align: left; }

@@ -25,7 +25,7 @@ Derlenmiş exe'ler [Releases](https://github.com/goktalay/convertmaster/releases
 - **Depolama:** tüm dönüştürülmüş dosyalar `%APPDATA%\Convert Master\converted\<proje>\` altında (kaynak klasör yapısıyla) geçici olarak tutulur; kaynak dosyalarınıza dokunulmaz. Proje bazında ya da Ayarlar › Depolama'dan toplu **"Çevrilmiş dosyaları sil"** (isteğe bağlı metinlerle birlikte), önizleme önbelleğini temizleme, model indirme/silme.
 - **Mastertool hesabı:** uygulama Mastertool hesabıyla açılır; "Beni hatırla" (Windows DPAPI), çevrimdışı çalışma, kayıt / şifremi unuttum / hesabım sayfaları.
 - **Uçtan uca şifreli senkron:** proje tanımları (ad, tür, uzantılar, kaynak türü, ayarlar), proje klasörleri ve genel ayarlar AES-256-GCM ile şifrelenip hesaba yedeklenir; anahtar şifrenizden cihazda türetilir (PBKDF2 + HKDF), sunucu içeriği okuyamaz. Dosyalar, kaynak yolları, seçimler, çıktılar ve metinler her cihazda ayrı kalır; başka cihazda açılan projede kaynak yeniden seçilir.
-- Gece / Gündüz / Sistem teması, Türkçe / İngilizce, yeni sürüm bildirimi.
+- Gece / Gündüz / Sistem teması (varsayılan Sistem); 8 dil: Türkçe, English, Français, Deutsch, Español, العربية (sağdan sola), 中文, Русский; Windows oturumuyla başlatma ve sistem tepsisi; yeni sürüm bildirimi ve Ayarlar › Hakkında › Güncellemeleri denetle.
 
 ## Desteklenen biçimler
 
