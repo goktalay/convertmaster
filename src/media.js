@@ -104,8 +104,13 @@ function probe(file) {
     const child = spawn(ffmpegPath(), ['-hide_banner', '-nostdin', '-i', file], { windowsHide: true });
     let err = '';
     child.stderr.on('data', (d) => { if (err.length < 200000) err += d.toString(); });
-    child.on('error', () => resolve({ duration: 0, video: null, audio: null }));
-    child.on('close', () => resolve(parseProbe(err)));
+    child.on('error', () => resolve({ duration: 0, video: null, audio: null, unreadable: true }));
+    // "ffmpeg -i" çıkış dosyası olmadığı için her zaman 1 döner; çökme (sinyal) ya da hiç akış yoksa okunamadı
+    child.on('close', (code, signal) => {
+      const info = parseProbe(err);
+      if (signal || (!info.video && !info.audio && !/Input #0/.test(err))) info.unreadable = true;
+      resolve(info);
+    });
   });
 }
 
@@ -336,6 +341,7 @@ async function convert({ src, out, type, target, options, onProgress, signal }) 
       await imageConvert(src, tmp, target, o.image || {}, signal);
     } else {
       const info = await probe(src);
+      if (info.unreadable) throw new ConvertError('unreadable');
       if (type === 'video' && !info.video) throw new ConvertError('no_video');
       if (type === 'audio' && !info.audio) throw new ConvertError('no_audio');
       const args = type === 'video' ? await videoArgs(target, o.video || {}, info) : audioOnlyArgs(target, o.audio || {});

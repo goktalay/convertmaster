@@ -251,10 +251,10 @@ function projectCard(c) {
     </div>
     <div class="conv"><span class="ext" title="${esc(src)}">${esc(c.sourceMode === 'file' && c.sourcePath ? FORMATS.extOf(c.sourcePath).toUpperCase() : src)}</span>${icon('arrowRight')}<span class="ext to">${esc((c.targetExt || '').toUpperCase())}</span></div>
     <div class="card-foot">
-      <span class="tag">${icon(c.sourceMode === 'file' ? 'file' : 'folder')}${esc(c.sourceMode === 'file' ? t('pf.modeFile') : t('pf.modeFolder'))}</span>
+      <span class="tag" title="${esc(c.sourceMode === 'file' ? t('pf.modeFile') : t('pf.modeFolder'))}">${icon(c.sourceMode === 'file' ? 'file' : 'folder')}${esc(c.sourceMode === 'file' ? t('pf.modeFile') : t('pf.modeFolder'))}</span>
       ${st.running ? `<span class="tag run"><span class="spin" style="width:10px;height:10px;border-width:1.5px;color:var(--accent)"></span>${esc(t('app.running'))}</span>` : ''}
-      ${st.done ? `<span class="tag ok">${icon('check')}${esc(t('app.doneCount', { n: st.done }))}</span>` : ''}
-      ${st.error ? `<span class="tag err">${icon('x')}${esc(t('app.errorCount', { n: st.error }))}</span>` : ''}
+      ${st.done ? `<span class="tag ok" title="${esc(t('app.doneCount', { n: st.done }))}">${icon('check')}${st.done}</span>` : ''}
+      ${st.error ? `<span class="tag err" title="${esc(t('app.errorCount', { n: st.error }))}">${icon('x')}${st.error}</span>` : ''}
       ${c.speech && c.speech.enabled ? `<span class="tag" title="${esc(t('pf.speechAsk'))}">${icon('mic')}</span>` : ''}
       ${where ? `<span class="tag">${icon('folder')}${esc(where)}</span>` : ''}
     </div></div>`);

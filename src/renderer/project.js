@@ -88,6 +88,9 @@ function paintHeader() {
   $('#btnSource').innerHTML = icon(project.sourceMode === 'file' ? 'file' : 'folder') + esc(project.sourcePath ? t('pj.changeSource') : t('pj.pickSource'));
   $('#listCol').classList.toggle('speech', !!speechOn());
   document.querySelector('#trCol [data-a="transcribe"]').classList.toggle('hidden', !isAV());
+  // Resim projelerinde metin (konuşma) paneli yok
+  $('#trCol').classList.toggle('closed', !isAV());
+  $('#splitTr').classList.toggle('closed', !isAV());
   paintListHead();
 }
 

@@ -30,7 +30,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'cvm', privileges: { standard: t
 function errText(err) {
   const code = err && err.code;
   const map = {
-    canceled: 'err.canceled', no_video: 'err.noVideo', no_audio: 'err.noAudio', unsupported: 'err.unsupported',
+    canceled: 'err.canceled', unreadable: 'err.unreadable', no_video: 'err.noVideo', no_audio: 'err.noAudio', unsupported: 'err.unsupported',
     ffmpeg_missing: 'err.ffmpegMissing', engine_missing: 'err.engineMissing', download_failed: 'err.download',
     ENOENT: 'err.notFound', EACCES: 'err.access', EPERM: 'err.access', EBUSY: 'err.busy', ENOSPC: 'err.noSpace',
   };

@@ -178,3 +178,5 @@ body {
 .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 [dir="rtl"] .proj-card .conv { direction: ltr; justify-content: flex-end; }
+.proj-card .card-foot .tag { flex: none; }
+.proj-card .card-foot .tag:first-child { flex: 0 1 auto; min-width: 0; }
