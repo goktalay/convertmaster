@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Yer tutucu simge: HEPGO'nun tasarımı gelince değiştirilecek -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#g)"/>
+  <g fill="none" stroke="#06101c" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M140 220a120 120 0 0 1 214-56"/><path d="M362 112v62h-62"/>
+    <path d="M372 292a120 120 0 0 1-214 56"/><path d="M150 400v-62h62"/>
+  </g>
+  <path d="M226 206v100l84-50z" fill="#06101c"/>
+</svg>

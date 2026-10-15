@@ -1,0 +1,83 @@
+{
+  "name": "convert-master",
+  "productName": "Convert Master",
+  "version": "1.0.0",
+  "description": "Video, resim ve ses dönüştürücü; konuşmadan metne (Mastertool ailesi)",
+  "main": "src/main.js",
+  "author": "Convert Master",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "icon": "node scripts/make-icon.js",
+    "whisper": "node scripts/fetch-whisper.js",
+    "dist": "node scripts/fetch-whisper.js && electron-builder --win",
+    "dist:portable": "node scripts/fetch-whisper.js && electron-builder --win portable"
+  },
+  "dependencies": {
+    "extract-zip": "^2.0.1",
+    "ffmpeg-static": "^5.3.0",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8"
+  },
+  "build": {
+    "appId": "com.convertmaster.app",
+    "productName": "Convert Master",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/sharp/**",
+      "node_modules/@img/**"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/whisper",
+        "to": "whisper",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "Convert-Master-Setup-${version}.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Convert Master",
+      "include": "build/installer.nsh",
+      "menuCategory": "Mastertool"
+    },
+    "portable": {
+      "artifactName": "Convert-Master-Portable-${version}.exe"
+    }
+  }
+}
