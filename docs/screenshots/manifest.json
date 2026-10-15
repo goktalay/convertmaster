@@ -70,5 +70,11 @@
     "theme": "light",
     "title": "Ayarlar › Depolama",
     "caption": "Dönüştürülmüş dosyalar AppData'da; tek tıkla silme"
+  },
+  {
+    "file": "13-resimden-metin-gece.png",
+    "theme": "dark",
+    "title": "Resimden metin (OCR)",
+    "caption": "İsteğe bağlı OCR: satır, güven ve metin; satırın yeri resimde vurgulanır"
   }
 ]

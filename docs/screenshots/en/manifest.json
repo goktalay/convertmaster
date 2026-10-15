@@ -1,0 +1,80 @@
+[
+  {
+    "file": "01-ana-ekran-gece.png",
+    "theme": "dark",
+    "title": "Home screen",
+    "caption": "Projects as cards: type, source → target extension and conversion status"
+  },
+  {
+    "file": "02-ana-ekran-gunduz.png",
+    "theme": "light",
+    "title": "Home screen (day)",
+    "caption": "Night, day or system theme; projects can be grouped in folders"
+  },
+  {
+    "file": "03-yeni-proje-gece.png",
+    "theme": "dark",
+    "title": "New project",
+    "caption": "Type, source and target extension, file or folder, files at once"
+  },
+  {
+    "file": "04-donusturme-ayarlari-gunduz.png",
+    "theme": "light",
+    "title": "Conversion settings",
+    "caption": "Quality, resolution, frame rate, H.264/H.265 and audio bitrate"
+  },
+  {
+    "file": "05-klasor-projesi-gece.png",
+    "theme": "dark",
+    "title": "Folder project",
+    "caption": "Folder tree, selected files and a separate progress column per row"
+  },
+  {
+    "file": "06-klasor-projesi-gunduz.png",
+    "theme": "light",
+    "title": "Folder project (day)",
+    "caption": "Two files converting at once; total progress in the status bar"
+  },
+  {
+    "file": "07-yan-yana-onizleme-gece.png",
+    "theme": "dark",
+    "title": "Side-by-side preview",
+    "caption": "Original MKV and resulting MP4 play together; resolution and size change"
+  },
+  {
+    "file": "08-resim-onizleme-gunduz.png",
+    "theme": "light",
+    "title": "Image preview",
+    "caption": "PNG → WEBP: original on the left, converted on the right; size saving"
+  },
+  {
+    "file": "09-konusmadan-metne-gece.png",
+    "theme": "dark",
+    "title": "Speech to text",
+    "caption": "Second, language and text of each sentence; click a row to jump there"
+  },
+  {
+    "file": "10-konusmadan-metne-gunduz.png",
+    "theme": "light",
+    "title": "Speech to text (day)",
+    "caption": "Offline whisper.cpp; export as SRT, VTT, TXT, CSV and JSON"
+  },
+  {
+    "file": "11-tek-dosya-gece.png",
+    "theme": "dark",
+    "title": "Single-file project",
+    "caption": "WAV → MP3: large progress bar, waveform and transcript"
+  },
+  {
+    "file": "12-ayarlar-depolama-gunduz.png",
+    "theme": "light",
+    "title": "Settings › Storage",
+    "caption": "Converted files are kept in AppData; delete them with one click"
+  },
+  {
+    "file": "13-resimden-metin-gece.png",
+    "theme": "dark",
+    "title": "Text from images (OCR)",
+    "caption": "Optional OCR: line, confidence and text; the line is highlighted"
+  }
+]

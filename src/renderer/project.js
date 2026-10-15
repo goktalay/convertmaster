@@ -722,7 +722,7 @@ function renderOcr(rel, tr) {
   tools.querySelector('button').onclick = async () => { await navigator.clipboard.writeText(tr.text || tr.lines.map((l) => l.text).join('\n')); toast(t('pj.copied'), { type: 'ok' }); };
   frag.appendChild(tools);
   tr.lines.forEach((l, i) => {
-    const r = h(`<div class="tr-row" data-i="${i}"><span class="ts">${i + 1}</span><span class="lg"><span class="conf ${l.conf >= 85 ? 'hi' : l.conf >= 60 ? 'mid' : 'lo'}">%${l.conf}</span></span><span class="tx"></span></div>`);
+    const r = h(`<div class="tr-row" data-i="${i}"><span class="ts">${i + 1}</span><span class="lg"><span class="conf ${l.conf >= 85 ? 'hi' : l.conf >= 60 ? 'mid' : 'lo'}">${LANG === 'tr' ? `%${l.conf}` : `${l.conf}%`}</span></span><span class="tx"></span></div>`);
     r.querySelector('.tx').textContent = l.text;
     r.onclick = () => {
       if (window.getSelection().toString()) return;
