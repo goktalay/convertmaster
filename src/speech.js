@@ -236,7 +236,7 @@ function createSpeech({ userDataDir, resourcesDir, devDir, fetch: fetchImpl = gl
     return { language: main ? main[0] : '', segments };
   }
 
-  return { status, binPath, hasModel, ensureEngine, ensureModel, deleteModel, transcribe, modelFile, _sliceWav: sliceWav, _segmentsOf: segmentsOf };
+  return { download, status, binPath, hasModel, ensureEngine, ensureModel, deleteModel, transcribe, modelFile, _sliceWav: sliceWav, _segmentsOf: segmentsOf };
 }
 
 // Altyazı / metin dışa aktarımı

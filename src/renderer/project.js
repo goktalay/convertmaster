@@ -27,7 +27,13 @@ for (const el of document.querySelectorAll('[data-t]')) el.textContent = t(el.da
 
 const T = () => FORMATS.TYPES[project.type] || FORMATS.TYPES.video;
 const isAV = () => project && (project.type === 'video' || project.type === 'audio');
-const speechOn = () => isAV() && project.speech && project.speech.enabled;
+const isImage = () => project && project.type === 'image';
+// Metin çıkarma: video/seste konuşmadan metne, resimde OCR — ikisi de projede istenirse açık
+const speechOn = () => (isImage() ? !!(project.ocr && project.ocr.enabled) : !!(isAV() && project.speech && project.speech.enabled));
+const textIcon = () => (isImage() ? 'text' : 'mic');
+const textActionLabel = (again) => (isImage() ? t(again ? 'pj.reocr' : 'pj.ocrThis') : t(again ? 'pj.retranscribe' : 'pj.transcribeThis'));
+const noTextLabel = () => (isImage() ? t('pj.noText') : t('pj.noAudio'));
+const noTextHint = () => (isImage() ? t('pj.noTextHint') : t('err.noAudio'));
 const fmtDur = (s) => {
   if (!s && s !== 0) return '';
   s = Math.round(s);
@@ -62,8 +68,7 @@ document.querySelector('#treeCol [data-a="collapse"]').innerHTML = icon('chevron
 document.querySelector('#treeCol [data-a="collapse"]').title = t('pj.collapseAll');
 document.querySelector('#treeCol [data-a="refresh"]').innerHTML = icon('refresh');
 document.querySelector('#treeCol [data-a="refresh"]').title = t('pj.rescan') + ' (F5)';
-document.querySelector('#trCol [data-a="transcribe"]').innerHTML = icon('mic');
-document.querySelector('#trCol [data-a="transcribe"]').title = t('pj.transcribeThis');
+
 document.querySelector('#trCol [data-a="export"]').innerHTML = icon('download');
 document.querySelector('#trCol [data-a="export"]').title = t('pj.exportTranscript');
 $('#statusFilter').innerHTML = [['all', t('pj.fAll')], ['pending', t('pj.fPending')], ['active', t('pj.fActive')], ['done', t('pj.fDone')], ['error', t('pj.fError')]]
@@ -87,10 +92,14 @@ function paintHeader() {
   $('#pjSrc').title = project.sourcePath || '';
   $('#btnSource').innerHTML = icon(project.sourceMode === 'file' ? 'file' : 'folder') + esc(project.sourcePath ? t('pj.changeSource') : t('pj.pickSource'));
   $('#listCol').classList.toggle('speech', !!speechOn());
-  document.querySelector('#trCol [data-a="transcribe"]').classList.toggle('hidden', !isAV());
-  // Resim projelerinde metin (konuşma) paneli yok
-  $('#trCol').classList.toggle('closed', !isAV());
-  $('#splitTr').classList.toggle('closed', !isAV());
+  // Metin paneli: video/seste konuşma (saniye · dil · metin), resimde OCR (satır · güven · metin)
+  const tb = document.querySelector('#trCol [data-a="transcribe"]');
+  tb.innerHTML = icon(textIcon());
+  tb.title = textActionLabel(false);
+  document.querySelector('#trCol .panel-title').textContent = isImage() ? t('pj.ocrPanel') : t('pj.transcript');
+  document.querySelector('#trCol .tr-head').innerHTML = isImage()
+    ? `<span>${esc(t('pj.trLine'))}</span><span>${esc(t('pj.trConf'))}</span><span>${esc(t('pj.trText'))}</span>`
+    : `<span>${esc(t('pj.trSecond'))}</span><span>${esc(t('pj.trLang'))}</span><span>${esc(t('pj.trText'))}</span>`;
   paintListHead();
 }
 
@@ -110,7 +119,7 @@ $('#btnExport').onclick = async () => {
   if (r) toast(t('pj.exported', { n: r.count }), { type: 'ok', sub: r.dest });
 };
 $('#btnClear').onclick = async () => {
-  const r = await clearOutputsDialog(t('pj.clearOutputs'), t('app.clearOutputsMsg', { name: esc(project.name) }), { speech: isAV() });
+  const r = await clearOutputsDialog(t('pj.clearOutputs'), t('app.clearOutputsMsg', { name: esc(project.name) }), { speech: true });
   if (!r) return;
   await window.api.pjDeleteOutputs({ transcripts: r.transcripts });
   toast(t('set.clearedConverted'), { type: 'ok' });
@@ -379,11 +388,11 @@ function progCell(f) {
 function speechCell(f) {
   const s = f.speech;
   if (!s) return '';
-  if (s.status === 'done') return `<span class="stat done" title="${esc(langName(s.language))}">${icon('text')}${esc(t('pj.segments', { n: s.count || 0 }))}</span>`;
+  if (s.status === 'done') return `<span class="stat done" title="${esc(isImage() ? ocrLangNames(s.language) : langName(s.language))}">${icon('text')}${esc(t(isImage() ? 'pj.lines' : 'pj.segments', { n: s.count || 0 }))}</span>`;
   if (s.status === 'error') return `<span class="stat error" title="${esc(s.error)}">${icon('x')}${esc(t('st.error'))}</span>`;
   if (s.status === 'queued') return `<span class="stat queued">${icon('history')}${esc(t('st.queued'))}</span>`;
   if (s.status === 'canceled') return `<span class="stat pending">${esc(t('st.canceled'))}</span>`;
-  if (s.status === 'none') return `<span class="stat pending" title="${esc(t('err.noAudio'))}">${esc(t('pj.noAudio'))}</span>`;
+  if (s.status === 'none') return `<span class="stat pending" title="${esc(noTextHint())}">${esc(noTextLabel())}</span>`;
   return `<div class="cell-prog speech"><div class="bar"><div style="width:${(s.progress || 0) * 100}%"></div></div><span class="pct">${Math.floor((s.progress || 0) * 100)}%</span></div>`;
 }
 function outCell(f) {
@@ -434,7 +443,7 @@ function rowMenu(x, y, f) {
   const busy = f.status === 'converting' || f.status === 'queued';
   contextMenu(x, y, [
     { label: done ? t('pj.reconvert') : t('pj.convertThis'), icon: 'play', disabled: busy, action: () => window.api.pjStart({ rels: [f.rel], force: true }) },
-    isAV() ? { label: f.speech && f.speech.status === 'done' ? t('pj.retranscribe') : t('pj.transcribeThis'), icon: 'mic', action: () => window.api.pjTranscribe([f.rel]) } : null,
+    { label: textActionLabel(f.speech && f.speech.status === 'done'), icon: textIcon(), action: () => window.api.pjTranscribe([f.rel]) },
     '-',
     { label: t('pj.openOut'), icon: 'open', disabled: !done, action: () => window.api.pjOpen(f.rel, 'out').catch((e) => toast(e.message, { type: 'err' })) },
     { label: t('pj.revealOut'), icon: 'folder', disabled: !done, action: () => window.api.pjReveal(f.rel, 'out') },
@@ -486,14 +495,14 @@ function renderSingle() {
       ${f.outSize ? `<div class="bp-row"><span>${esc(t('pj.colOut'))}: ${formatSize(f.outSize)}</span><span>${f.outSize < f.size ? '−' : '+'}${Math.abs(Math.round((1 - f.outSize / f.size) * 100))}%</span></div>` : ''}
     </div>
     ${f.error ? `<div class="err-box">${esc(f.error)}</div>` : ''}
-    ${sp ? `<div class="big-prog speech ${sp.status === 'error' ? 'error' : ''}"><div class="bp-row"><span>${icon('mic')} ${esc(t('pj.colSpeech'))}</span><span>${sp.status === 'done' ? esc(t('pj.segments', { n: sp.count || 0 })) + ' · ' + esc(langName(sp.language)) : sp.status === 'none' ? esc(t('err.noAudio')) : sp.status === 'error' ? esc(t('st.error')) : sp.status === 'queued' ? esc(t('st.queued')) : Math.floor((sp.progress || 0) * 100) + '%'}</span></div>
+    ${sp ? `<div class="big-prog speech ${sp.status === 'error' ? 'error' : ''}"><div class="bp-row"><span>${icon(textIcon())} ${esc(t('pj.colSpeech'))}</span><span>${sp.status === 'done' ? esc(t(isImage() ? 'pj.lines' : 'pj.segments', { n: sp.count || 0 })) + ' · ' + esc(isImage() ? ocrLangNames(sp.language) : langName(sp.language)) : sp.status === 'none' ? esc(noTextHint()) : sp.status === 'error' ? esc(t('st.error')) : sp.status === 'queued' ? esc(t('st.queued')) : Math.floor((sp.progress || 0) * 100) + '%'}</span></div>
       <div class="bar"><div style="width:${(sp.status === 'done' ? 1 : sp.progress || 0) * 100}%"></div></div>${sp.error ? `<div class="err-box">${esc(sp.error)}</div>` : ''}</div>` : ''}
     <div class="sc-actions">
       ${f.status === 'done' ? `<button class="btn sm" data-a="again">${icon('refresh')}${esc(t('pj.reconvert'))}</button>
         <button class="btn sm" data-a="open">${icon('open')}${esc(t('pj.openOut'))}</button>
         <button class="btn sm" data-a="reveal">${icon('folder')}${esc(t('pj.revealOut'))}</button>
         <button class="btn sm" data-a="export">${icon('export')}${esc(t('pj.exportThis'))}</button>` : ''}
-      ${isAV() && f.status !== 'converting' && (!sp || ['error', 'canceled'].includes(sp.status) || sp.status === 'done') ? `<button class="btn sm" data-a="speech">${icon('mic')}${esc(sp && sp.status === 'done' ? t('pj.retranscribe') : t('pj.transcribeThis'))}</button>` : ''}
+      ${f.status !== 'converting' && (!sp || ['error', 'canceled', 'done'].includes(sp.status)) ? `<button class="btn sm" data-a="speech">${icon(textIcon())}${esc(textActionLabel(sp && sp.status === 'done'))}</button>` : ''}
     </div></div>`;
   el.querySelector('.sc-name').textContent = nameOf(f.rel);
   el.querySelector('.sc-name').title = snap.sourcePath;
@@ -597,6 +606,9 @@ async function showPane(which, f) {
     const img = h('<img class="full" alt="">');
     img.src = pv.url;
     body.appendChild(img);
+    body.appendChild(h('<div class="ocr-box hidden"></div>'));
+    mediaEls[which] = img;
+    img.addEventListener('load', () => { if (ocrSel >= 0) showOcrBox(ocrSel); });
     return;
   }
   if (pv.kind === 'audio') {
@@ -644,7 +656,7 @@ let syncing = false;
 function attachMedia(which, el) {
   mediaEls[which] = el;
   const other = () => mediaEls[which === 'src' ? 'out' : 'src'];
-  const linked = () => settings.linkPreview !== false && other() && other().isConnected;
+  const linked = () => settings.linkPreview !== false && other() && other().isConnected && other().tagName !== 'IMG';
   const guard = (fn) => () => { if (syncing || !linked()) return; syncing = true; try { fn(other()); } finally { setTimeout(() => (syncing = false), 50); } };
   el.addEventListener('play', guard((o) => { o.currentTime = el.currentTime; o.play().catch(() => {}); }));
   el.addEventListener('pause', guard((o) => o.pause()));
@@ -658,21 +670,23 @@ async function loadTranscript() {
   transcript = null;
   const f = selected && files.get(selected);
   const showEmpty = (msg, withBtn) => {
-    body.innerHTML = `<div class="tr-empty">${icon('mic')}<span>${esc(msg)}</span>${withBtn ? `<button class="btn sm">${icon('mic')}${esc(t('pj.transcribeThis'))}</button>` : ''}</div>`;
+    body.innerHTML = `<div class="tr-empty">${icon(textIcon())}<span>${esc(msg)}</span>${withBtn ? `<button class="btn sm">${icon(textIcon())}${esc(textActionLabel(false))}</button>` : ''}</div>`;
     const b = body.querySelector('button');
     if (b) b.onclick = () => window.api.pjTranscribe([f.rel]);
   };
-  if (!isAV()) return showEmpty(t('pj.trImage'), false);
+  ocrSel = -1;
+  hideOcrBoxes();
   if (!f) return showEmpty(t('pj.trPick'), false);
   const s = f.speech;
-  if (!s) return showEmpty(speechOn() ? t('pj.trAfter') : t('pj.trOff'), true);
+  if (!s) return showEmpty(speechOn() ? t(isImage() ? 'pj.ocrAfter' : 'pj.trAfter') : t(isImage() ? 'pj.ocrOff' : 'pj.trOff'), true);
   if (s.status === 'queued') return showEmpty(t('st.queued'), false);
-  if (s.status === 'running') return showEmpty(t('pj.trRunning', { p: Math.floor((s.progress || 0) * 100) }), false);
+  if (s.status === 'running') return showEmpty(t(isImage() ? 'pj.ocrRunning' : 'pj.trRunning', { p: Math.floor((s.progress || 0) * 100) }), false);
   if (s.status === 'error') return showEmpty(`${t('st.error')}: ${s.error}`, true);
   if (s.status === 'canceled') return showEmpty(t('st.canceled'), true);
-  if (s.status === 'none') return showEmpty(t('err.noAudio'), false);
+  if (s.status === 'none') return showEmpty(noTextHint(), isImage());
   const tr = await window.api.pjTranscript(f.rel);
   if (selected !== f.rel) return;
+  if (tr && tr.kind === 'ocr') return renderOcr(f.rel, tr);
   if (!tr || !(tr.segments || []).length) return showEmpty(t('pj.trNone'), true);
   transcript = { rel: f.rel, segments: tr.segments };
   const frag = document.createDocumentFragment();
@@ -689,8 +703,68 @@ async function loadTranscript() {
   body.replaceChildren(frag);
 }
 
+// --- OCR: satır · güven · metin; satıra tıklayınca resimde konumu vurgulanır ---------------------
+let ocrSel = -1;
+function ocrLangNames(code) {
+  return String(code || '').split('+').filter(Boolean).map((c) => langName(FORMATS.OCR_ISO[c] || c)).join(', ');
+}
+
+function renderOcr(rel, tr) {
+  const body = $('#trBody');
+  if (!(tr.lines || []).length) {
+    body.innerHTML = `<div class="tr-empty">${icon('text')}<span>${esc(noTextHint())}</span></div>`;
+    return;
+  }
+  transcript = { rel, ocr: tr };
+  const frag = document.createDocumentFragment();
+  const tools = h(`<div class="ocr-tools"><span>${esc(ocrLangNames((tr.languages || []).join('+')))}</span>
+    <button class="btn sm ghost">${icon('copy')}${esc(t('pj.copyAll'))}</button></div>`);
+  tools.querySelector('button').onclick = async () => { await navigator.clipboard.writeText(tr.text || tr.lines.map((l) => l.text).join('\n')); toast(t('pj.copied'), { type: 'ok' }); };
+  frag.appendChild(tools);
+  tr.lines.forEach((l, i) => {
+    const r = h(`<div class="tr-row" data-i="${i}"><span class="ts">${i + 1}</span><span class="lg"><span class="conf ${l.conf >= 85 ? 'hi' : l.conf >= 60 ? 'mid' : 'lo'}">%${l.conf}</span></span><span class="tx"></span></div>`);
+    r.querySelector('.tx').textContent = l.text;
+    r.onclick = () => {
+      if (window.getSelection().toString()) return;
+      body.querySelectorAll('.tr-row.now').forEach((x) => x.classList.remove('now'));
+      r.classList.add('now');
+      showOcrBox(i);
+    };
+    frag.appendChild(r);
+  });
+  body.replaceChildren(frag);
+}
+
+function hideOcrBoxes() { document.querySelectorAll('.ocr-box').forEach((b) => b.classList.add('hidden')); }
+
+// OCR koordinatları kaynak resme göredir; her önizlemede resmin ekrandaki (object-fit: contain) yerine ölçeklenir
+function showOcrBox(i) {
+  ocrSel = i;
+  const tr = transcript && transcript.ocr;
+  const line = tr && tr.lines[i];
+  if (!line) return;
+  for (const which of ['src', 'out']) {
+    const img = mediaEls[which];
+    const box = pane(which).querySelector('.ocr-box');
+    if (!img || !box || img.tagName !== 'IMG' || !img.naturalWidth) { if (box) box.classList.add('hidden'); continue; }
+    const W = img.clientWidth;
+    const H = img.clientHeight;
+    const s = Math.min(W / img.naturalWidth, H / img.naturalHeight);
+    const offX = img.offsetLeft + (W - img.naturalWidth * s) / 2;
+    const offY = img.offsetTop + (H - img.naturalHeight * s) / 2;
+    const k = img.naturalWidth / (tr.width || img.naturalWidth); // dönüştürülmüş resim küçültülmüş olabilir
+    const b = line.bbox;
+    Object.assign(box.style, {
+      left: `${offX + b.x0 * k * s - 3}px`, top: `${offY + b.y0 * k * s - 3}px`,
+      width: `${(b.x1 - b.x0) * k * s + 6}px`, height: `${(b.y1 - b.y0) * k * s + 6}px`,
+    });
+    box.classList.remove('hidden');
+  }
+}
+window.addEventListener('resize', () => { if (ocrSel >= 0) showOcrBox(ocrSel); });
+
 function seekTo(sec) {
-  const els = [mediaEls.src, mediaEls.out].filter((x) => x && x.isConnected);
+  const els = [mediaEls.src, mediaEls.out].filter((x) => x && x.isConnected && x.tagName !== 'IMG');
   if (!els.length) return;
   const linked = settings.linkPreview !== false;
   syncing = true;
@@ -700,7 +774,7 @@ function seekTo(sec) {
 
 let lastSeg = -1;
 function highlightSegment(time, which) {
-  if (!transcript || (which === 'out' && mediaEls.src && !mediaEls.src.paused)) return;
+  if (!transcript || !transcript.segments || (which === 'out' && mediaEls.src && !mediaEls.src.paused)) return;
   const segs = transcript.segments;
   let lo = 0;
   let hi = segs.length - 1;
@@ -721,7 +795,8 @@ $('#trCol [data-a="transcribe"]').onclick = () => { if (selected) window.api.pjT
 $('#trCol [data-a="export"]').onclick = (e) => {
   if (!transcript) return toast(t('pj.trNoExport'), { type: 'err' });
   const r = e.currentTarget.getBoundingClientRect();
-  const fmts = [['srt', t('pj.fmtSrt')], ['vtt', t('pj.fmtVtt')], ['txt', t('pj.fmtTxt')], ['csv', t('pj.fmtCsv')], ['json', 'JSON']];
+  const fmts = transcript.ocr ? [['txt', t('pj.fmtTxt')], ['csv', t('pj.fmtCsv')], ['json', 'JSON']]
+    : [['srt', t('pj.fmtSrt')], ['vtt', t('pj.fmtVtt')], ['txt', t('pj.fmtTxt')], ['csv', t('pj.fmtCsv')], ['json', 'JSON']];
   contextMenu(r.left - 150, r.bottom + 4, fmts.map(([k, l]) => ({
     label: l, icon: 'download', action: async () => {
       const p = await window.api.pjExportTranscript(transcript.rel, k);
@@ -735,7 +810,8 @@ window.api.onSpeechDownload((x) => {
   const bar = $('#dlBar');
   if (!x) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
-  const what = x.what === 'engine' ? t('speech.dlEngine') : t('speech.dlModel', { model: t(`speech.model.${x.model}`) });
+  const what = x.what === 'engine' ? t('speech.dlEngine') : x.what === 'ocr' ? t('ocr.dl', { lang: ocrLangNames(x.lang) })
+    : t('speech.dlModel', { model: t(`speech.model.${x.model}`) });
   bar.innerHTML = `<span>${esc(what)} — ${Math.floor((x.progress || 0) * 100)}%${x.total ? ` (${formatSize(x.got)} / ${formatSize(x.total)})` : ''}</span><div class="progress"><div style="width:${(x.progress || 0) * 100}%"></div></div>`;
 });
 

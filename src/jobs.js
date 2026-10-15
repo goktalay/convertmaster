@@ -6,7 +6,11 @@
 // Diskte (hepsi %APPDATA%\Convert Master altında, cihaza özgü):
 //   converted/<projeId>/<göreli klasör>/<ad>.<hedef>   dönüştürülmüş dosyalar (kullanıcı silebilir)
 //   work/<projeId>/state.json                         dosya durumları
-//   work/<projeId>/speech/<özet>.json                 metin (konuşma) sonuçları
+//   work/<projeId>/speech/<özet>.json                 metin (konuşma) sonuçları — video ve ses
+//   work/<projeId>/ocr/<özet>.json                    resimden okunan metin (OCR) — resim
+//
+// "Metin çıkarma" adımı (isteğe bağlı): video/seste konuşmadan metne, resimde OCR. Durumu her iki türde de
+// öğenin "speech" alanında tutulur (1.0.0 durum dosyalarıyla uyum için ad korunmuştur).
 //   work/<projeId>/tmp/                               geçici WAV'lar
 
 const fs = require('fs');
@@ -56,7 +60,7 @@ async function scanFolder(root, exts, recursive) {
 }
 
 class ProjectRunner {
-  // deps: { userDataDir, getProject(), getLocal(), speech, getSettings(), send(channel, data), errText(err) }
+  // deps: { userDataDir, getProject(), getLocal(), speech, ocr, getSettings(), send(channel, data), errText(err) }
   constructor(projectId, deps) {
     this.id = projectId;
     this.deps = deps;
@@ -205,11 +209,13 @@ class ProjectRunner {
     if (!this.outMap) this.computeOutputs();
     return path.join(this.outDir, ...(this.outMap.get(rel) || rel).split('/'));
   }
-  speechFile(rel) { return path.join(this.workDir, 'speech', `${sha(rel)}.json`); }
+  speechFile(rel) { return path.join(this.workDir, this.project().type === 'image' ? 'ocr' : 'speech', `${sha(rel)}.json`); }
 
   // --- Çalıştırma ------------------------------------------------------------------
+  // Metin çıkarma istendi mi: video/seste "konuşmayı metne çevir", resimde "OCR" seçeneği (ikisi de varsayılan kapalı)
   speechWanted() {
     const p = this.project();
+    if (p && p.type === 'image') return !!(p.ocr && p.ocr.enabled);
     return !!(p && p.speech && p.speech.enabled && (p.type === 'video' || p.type === 'audio'));
   }
 
@@ -317,13 +323,14 @@ class ProjectRunner {
 
   // Tek dosyayı (dönüştürmeden) metne çevir
   transcribeOnly(rels) {
-    if (!this.root || !(this.project().type === 'video' || this.project().type === 'audio')) return;
+    if (!this.root) return;
     for (const rel of rels) this.queueSpeech(rel);
     this.emitState();
     this.pump();
   }
 
   async runSpeech(rel) {
+    if (this.project().type === 'image') return this.runOcr(rel);
     const p = this.project();
     const it = this.item(rel);
     const ctl = new AbortController();
@@ -364,6 +371,36 @@ class ProjectRunner {
     }
   }
 
+  async runOcr(rel) {
+    const p = this.project();
+    const it = this.item(rel);
+    const ctl = new AbortController();
+    this.speechActive.set(rel, ctl);
+    it.speech = { status: 'running', progress: 0 };
+    this.touch(rel);
+    const langs = (p.ocr && p.ocr.languages && p.ocr.languages.length ? p.ocr.languages : ['tur', 'eng']);
+    try {
+      // Dil verisi yoksa indirilir (ilerleme pencereye ayrıca bildirilir)
+      await this.deps.ocr.ensureLanguages(langs, { signal: ctl.signal, onProgress: (x, got, total, lang) => this.deps.send('speech:download', { what: 'ocr', lang, progress: x, got, total }) });
+      this.deps.send('speech:download', null);
+      const res = await this.deps.ocr.recognize(this.srcPath(rel), {
+        langs, workDir: path.join(this.workDir, 'tmp'), signal: ctl.signal,
+        onProgress: (x) => { it.speech.progress = x; this.touch(rel); },
+      });
+      await fs.promises.mkdir(path.dirname(this.speechFile(rel)), { recursive: true });
+      await fs.promises.writeFile(this.speechFile(rel), JSON.stringify({ rel, kind: 'ocr', createdAt: Date.now(), ...res }), 'utf8');
+      it.speech = res.lines.length ? { status: 'done', progress: 1, count: res.lines.length, language: langs.join('+') } : { status: 'none', progress: 0 };
+    } catch (e) {
+      this.deps.send('speech:download', null);
+      it.speech = e.code === 'canceled' ? { status: 'canceled', progress: 0 } : { status: 'error', progress: 0, error: this.deps.errText(e) };
+    } finally {
+      this.speechActive.delete(rel);
+      this.touch(rel);
+      this.save();
+      this.pump();
+    }
+  }
+
   async transcript(rel) {
     try { return JSON.parse(await fs.promises.readFile(this.speechFile(rel), 'utf8')); } catch { return null; }
   }
@@ -383,7 +420,10 @@ class ProjectRunner {
     }
     if (!rels) {
       await fs.promises.rm(this.outDir, { recursive: true, force: true }).catch(() => {});
-      if (transcripts) await fs.promises.rm(path.join(this.workDir, 'speech'), { recursive: true, force: true }).catch(() => {});
+      if (transcripts) {
+        await fs.promises.rm(path.join(this.workDir, 'speech'), { recursive: true, force: true }).catch(() => {});
+        await fs.promises.rm(path.join(this.workDir, 'ocr'), { recursive: true, force: true }).catch(() => {});
+      }
     }
     this.save();
     this.emitState();

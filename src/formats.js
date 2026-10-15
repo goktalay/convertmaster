@@ -47,6 +47,13 @@
   const SPEECH_LANGS = ['auto', 'tr', 'en', 'de', 'fr', 'es', 'it', 'pt', 'nl', 'ru', 'uk', 'ar', 'fa', 'az', 'el', 'bg', 'ro', 'pl', 'cs', 'hu',
     'sv', 'no', 'da', 'fi', 'zh', 'ja', 'ko', 'hi', 'ur', 'id', 'ms', 'th', 'vi', 'he'];
 
+  // Resimden metin (OCR, Tesseract) dilleri — Tesseract kodları; ilk kullanımda indirilir
+  const OCR_LANGS = ['tur', 'eng', 'deu', 'fra', 'spa', 'ita', 'por', 'nld', 'rus', 'ukr', 'ara', 'fas', 'heb', 'aze', 'ell', 'pol',
+    'chi_sim', 'chi_tra', 'jpn', 'kor', 'hin'];
+  // Tesseract kodu → ISO 639-1 (dil adını göstermek için)
+  const OCR_ISO = { tur: 'tr', eng: 'en', deu: 'de', fra: 'fr', spa: 'es', ita: 'it', por: 'pt', nld: 'nl', rus: 'ru', ukr: 'uk', ara: 'ar',
+    fas: 'fa', heb: 'he', aze: 'az', ell: 'el', pol: 'pl', chi_sim: 'zh-Hans', chi_tra: 'zh-Hant', jpn: 'ja', kor: 'ko', hin: 'hi' };
+
   const QUALITY = ['high', 'medium', 'low'];
   const RESOLUTIONS = ['source', '2160', '1440', '1080', '720', '480', '360'];
   const FPS = ['source', '60', '50', '30', '25', '24', '15'];
@@ -76,7 +83,12 @@
     return { enabled: false, model: 'base', language: 'auto', perWindow: false };
   }
 
-  const api = { TYPES, SPEECH_MODELS, SPEECH_LANGS, QUALITY, RESOLUTIONS, FPS, AUDIO_BITRATES, SAMPLE_RATES, extOf, typeOfExt, defaultOptions, defaultSpeech };
+  // Resim projelerinde OCR (varsayılan kapalı; istenirse açılır)
+  function defaultOcr() {
+    return { enabled: false, languages: ['tur', 'eng'] };
+  }
+
+  const api = { TYPES, SPEECH_MODELS, SPEECH_LANGS, OCR_LANGS, OCR_ISO, defaultOcr, QUALITY, RESOLUTIONS, FPS, AUDIO_BITRATES, SAMPLE_RATES, extOf, typeOfExt, defaultOptions, defaultSpeech };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FORMATS = api;
 })(typeof self !== 'undefined' ? self : this);

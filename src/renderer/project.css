@@ -254,3 +254,11 @@ body.resizing-row, body.resizing-row * { cursor: row-resize !important; user-sel
 /* Arapça: dosya yolları, uzantılar ve metin dökümü (saniye · dil · metin) soldan sağa kalır */
 [dir="rtl"] .tr-head, [dir="rtl"] .tr-row, [dir="rtl"] .pj-conv, [dir="rtl"] .lrow .nm, [dir="rtl"] .trow .tn, [dir="rtl"] .pv-info { direction: ltr; }
 [dir="rtl"] .tr-head, [dir="rtl"] .tr-row { text-align: left; }
+
+/* OCR: satır vurgusu ve güven etiketi */
+.ocr-box { position: absolute; border: 2px solid var(--warn); border-radius: 4px; background: rgba(251, 191, 36, .14); box-shadow: 0 0 0 9999px rgba(0, 0, 0, .18); pointer-events: none; transition: all .15s; }
+.ocr-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--text-3); }
+.conf { font-size: 11px; font-variant-numeric: tabular-nums; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--border); direction: ltr; display: inline-block; }
+.conf.hi { color: var(--ok); border-color: rgba(52, 211, 153, .35); }
+.conf.mid { color: var(--warn); border-color: rgba(251, 191, 36, .35); }
+.conf.lo { color: var(--err); border-color: rgba(248, 113, 113, .35); }

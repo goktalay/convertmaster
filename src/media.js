@@ -401,6 +401,18 @@ async function previewCopy(src, out, kind, { duration = 0, onProgress, signal } 
   return out;
 }
 
+// OCR girişi: herhangi bir resmi PNG'ye çevirir; { width, height } döner
+async function toPng(src, out) {
+  await fs.promises.mkdir(path.dirname(out), { recursive: true });
+  if (SHARP_READ.has(extOf(src))) {
+    const info = await getSharp()(src, { density: 300, limitInputPixels: false }).rotate().png().toFile(out);
+    return { width: info.width, height: info.height };
+  }
+  await runFfmpeg(['-i', src, '-frames:v', '1', out]);
+  const m = await getSharp()(out).metadata();
+  return { width: m.width, height: m.height };
+}
+
 // Konuşma tanıma girişi: 16 kHz, mono, 16 bit WAV
 async function extractSpeechWav(src, out, { duration = 0, onProgress, signal } = {}) {
   await fs.promises.mkdir(path.dirname(out), { recursive: true });
@@ -408,7 +420,7 @@ async function extractSpeechWav(src, out, { duration = 0, onProgress, signal } =
 }
 
 module.exports = {
-  ffmpegPath, probe, parseProbe, mediaInfo, convert, poster, waveform, previewCopy, extractSpeechWav, runFfmpeg, ConvertError,
+  ffmpegPath, probe, parseProbe, mediaInfo, convert, toPng, poster, waveform, previewCopy, extractSpeechWav, runFfmpeg, ConvertError,
   // testler için
   _videoArgs: videoArgs, _audioOnlyArgs: audioOnlyArgs, _scaleFilter: scaleFilter,
 };

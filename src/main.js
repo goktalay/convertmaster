@@ -12,6 +12,7 @@ const media = require('./media');
 const { createAccount, apiBase } = require('./account');
 const { ProjectRunner, dirSize } = require('./jobs');
 const { createSpeech, exportTranscript } = require('./speech');
+const { createOcr, exportOcr } = require('./ocr');
 
 // Arayüz dili: ayarlarda seçilen ya da sistem dili (desteklenmiyorsa İngilizce)
 let t = I18N.createT('en');
@@ -37,6 +38,7 @@ function errText(err) {
   if (map[code]) return t(map[code], { msg: err.message || '' });
   if (code === 'ffmpeg_failed') return t('err.ffmpeg', { msg: err.message });
   if (code === 'whisper_failed') return t('err.whisper', { msg: err.message });
+  if (err && /tesseract|traineddata|Error opening data file/i.test(String(err.message || err))) return t('err.ocr', { msg: String(err.message || err).slice(0, 200) });
   return String((err && err.message) || err || 'error');
 }
 
@@ -58,7 +60,8 @@ const defaultStore = () => ({
     closeToTray: false,      // kapat (X) ana pencereyi tepsiye gizler
     defaultConcurrency: 2,   // yeni projelerde aynı anda çevrilecek dosya sayısı
     speechModel: 'base',     // yeni projelerde konuşma modeli
-    speechConcurrency: 1,    // aynı anda metne çevrilecek dosya (whisper işlemciyi yoğun kullanır)
+    speechConcurrency: 1,    // aynı anda metne çevrilecek dosya (whisper / OCR işlemciyi yoğun kullanır)
+    ocrLanguages: ['tur', 'eng'], // yeni resim projelerinde OCR dilleri
     // görünüm (cihaza özgü, sessiz kaydedilir)
     previewHeight: 320,
     treeWidth: 280,
@@ -329,6 +332,7 @@ function openProjectWindow(id) {
 // ---------------------------------------------------------------------------
 const runners = new Map(); // projeId -> ProjectRunner
 let speech = null;
+let ocr = null;
 
 function getRunner(id) {
   let r = runners.get(id);
@@ -339,6 +343,7 @@ function getRunner(id) {
       getLocal,
       getSettings: () => store.settings,
       speech,
+      ocr,
       errText,
       send: (ch, data) => {
         const w = projectWindows.get(id);
@@ -621,6 +626,14 @@ ipcMain.handle('project:save', (_e, form) => {
       model: oneOf(form.speech && form.speech.model, Object.keys(FORMATS.SPEECH_MODELS), store.settings.speechModel || 'base'),
       language: oneOf(form.speech && form.speech.language, FORMATS.SPEECH_LANGS, 'auto'),
       perWindow: !!(form.speech && form.speech.perWindow),
+    },
+    // Resimden metin (OCR) — yalnız resim projelerinde, istenirse
+    ocr: {
+      enabled: type === 'image' && !!(form.ocr && form.ocr.enabled),
+      languages: (() => {
+        const l = ((form.ocr && form.ocr.languages) || []).filter((x) => FORMATS.OCR_LANGS.includes(x));
+        return l.length ? [...new Set(l)].slice(0, 6) : (store.settings.ocrLanguages || ['tur', 'eng']);
+      })(),
     },
     options: cleanOptions(form.options),
     folderId: form.folderId ?? p.folderId ?? null,
@@ -910,7 +923,7 @@ ipcMain.handle('pj:exportTranscript', wrap(async (event, { rel, format }) => {
     filters: [{ name: format.toUpperCase(), extensions: [format] }],
   });
   if (res.canceled || !res.filePath) return null;
-  await fs.promises.writeFile(res.filePath, exportTranscript(tr.segments || [], format), 'utf8');
+  await fs.promises.writeFile(res.filePath, tr.kind === 'ocr' ? exportOcr(tr, format) : exportTranscript(tr.segments || [], format), 'utf8');
   return res.filePath;
 }));
 
@@ -941,10 +954,31 @@ ipcMain.handle('speech:download', async (event, model) => {
 ipcMain.handle('speech:cancelDownload', (_e, model) => downloads.get(model)?.abort());
 ipcMain.handle('speech:deleteModel', (_e, model) => speech.deleteModel(model));
 
+// OCR dil verileri (ayarlar)
+ipcMain.handle('ocr:status', () => ({ ...ocr.status(), downloading: [...downloads.keys()].filter((k) => k.startsWith('ocr:')).map((k) => k.slice(4)) }));
+ipcMain.handle('ocr:download', async (_e, lang) => {
+  const key = `ocr:${lang}`;
+  if (downloads.has(key)) return { ok: true };
+  const ctl = new AbortController();
+  downloads.set(key, ctl);
+  const send = (x) => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send('speech:download', x); };
+  try {
+    await ocr.ensureLanguage(lang, { signal: ctl.signal, onProgress: (p, got, total) => send({ what: 'ocr', lang, progress: p, got, total }) });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: ctl.signal.aborted ? t('err.canceled') : errText(e) };
+  } finally {
+    downloads.delete(key);
+    send(null);
+  }
+});
+ipcMain.handle('ocr:cancelDownload', (_e, lang) => downloads.get(`ocr:${lang}`)?.abort());
+ipcMain.handle('ocr:delete', (_e, lang) => ocr.deleteLanguage(lang));
+
 ipcMain.handle('storage:info', async () => ({
   converted: await dirSize(userDir('converted')),
   cache: await dirSize(cacheDir()),
-  models: await dirSize(userDir('models')),
+  models: (await dirSize(userDir('models'))) + (await dirSize(userDir('ocr'))),
   dir: app.getPath('userData'),
 }));
 ipcMain.handle('storage:clearConverted', async (_e, { transcripts } = {}) => {
@@ -990,6 +1024,7 @@ if (!gotLock) {
       devDir: path.join(__dirname, '..', 'vendor', 'whisper'),
       fetch: (url, opts) => net.fetch(url, opts), // sistem proxy ayarlarına uyar
     });
+    ocr = createOcr({ userDataDir: app.getPath('userData'), download: speech.download });
     initAccount();
     cleanupCache().catch(() => {});
     // Uygulama girişsiz açılmaz. "Beni hatırla" ile saklı oturum varsa doğrudan açılır
@@ -1007,6 +1042,7 @@ if (!gotLock) {
 
   app.on('window-all-closed', () => {
     destroyTray();
+    if (ocr) ocr.close();
     for (const r of runners.values()) r.close();
     if (saveTimer) { clearTimeout(saveTimer); writeStore(); }
     app.quit();

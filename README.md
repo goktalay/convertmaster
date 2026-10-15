@@ -22,6 +22,7 @@ Derlenmiş exe'ler [Releases](https://github.com/goktalay/convertmaster/releases
   - Sağ tık: yeniden dönüştür, metne çevir, aç, klasörde göster, başka klasöre kopyala, dönüştürülmüş dosyayı sil, listeden çıkar.
   - Durum çubuğunda toplam ilerleme, çıktı boyutu ve "aynı anda" ayarı (anında değiştirilebilir).
 - **Konuşmadan metne:** [whisper.cpp](https://github.com/ggml-org/whisper.cpp) ile bu bilgisayarda, çevrimdışı. **Metin** panelinde 1. sütunda cümlenin geçtiği **saniye**, 2. sütunda **dil**, 3. sütunda **metin**; satıra tıklayınca önizleme o saniyeye gider, oynatırken geçerli cümle vurgulanır. Dil otomatik algılanır (ya da seçilir); "her 30 saniyede dili yeniden algıla" çok dilli kayıtlar içindir. SRT, WebVTT, TXT, CSV, JSON olarak dışa aktarılır. Modeller ilk kullanımda indirilir: Çok küçük (~75 MB), Temel (~142 MB, önerilen), Küçük (~466 MB), Orta (~514 MB), Large v3 Turbo (~547 MB).
+- **Resimden metin (OCR):** resim projelerinde isteğe bağlı **"Resimdeki metni oku (OCR)"** seçeneği (varsayılan kapalı; konuşmadan metne de aynı şekilde isteğe bağlıdır — istenmezse hiç çalışmaz, model/dil verisi bile indirilmez). [Tesseract](https://github.com/tesseract-ocr/tesseract) (tesseract.js) ile bu bilgisayarda, çevrimdışı. **Metin (OCR)** panelinde satır no, okuma güveni (%) ve metin; satıra tıklayınca satırın yeri orijinal ve dönüştürülmüş resimde vurgulanır; "Tümünü kopyala"; TXT, CSV, JSON dışa aktarım. 21 dil (Türkçe, İngilizce, Almanca, Fransızca, İspanyolca, Arapça, Rusça, Çince, Japonca, Korece…); projede en çok 6 dil seçilir, her dilin verisi (~2–15 MB) ilk kullanımda bir kez indirilir. Metinsiz resimler "Metin yok" olarak işaretlenir.
 - **Depolama:** tüm dönüştürülmüş dosyalar `%APPDATA%\Convert Master\converted\<proje>\` altında (kaynak klasör yapısıyla) geçici olarak tutulur; kaynak dosyalarınıza dokunulmaz. Proje bazında ya da Ayarlar › Depolama'dan toplu **"Çevrilmiş dosyaları sil"** (isteğe bağlı metinlerle birlikte), önizleme önbelleğini temizleme, model indirme/silme.
 - **Mastertool hesabı:** uygulama Mastertool hesabıyla açılır; "Beni hatırla" (Windows DPAPI), çevrimdışı çalışma, kayıt / şifremi unuttum / hesabım sayfaları.
 - **Uçtan uca şifreli senkron:** proje tanımları (ad, tür, uzantılar, kaynak türü, ayarlar), proje klasörleri ve genel ayarlar AES-256-GCM ile şifrelenip hesaba yedeklenir; anahtar şifrenizden cihazda türetilir (PBKDF2 + HKDF), sunucu içeriği okuyamaz. Dosyalar, kaynak yolları, seçimler, çıktılar ve metinler her cihazda ayrı kalır; başka cihazda açılan projede kaynak yeniden seçilir.
@@ -46,7 +47,7 @@ Kodekler: MP4/MKV/MOV/M4V/FLV/3GP → H.264 (isteğe bağlı H.265) + AAC; WebM 
 - `converted\<projeId>\` — dönüştürülmüş dosyalar
 - `work\<projeId>\state.json` — dosya durumları; `work\<projeId>\speech\` — metinler
 - `cache\preview\` — önizleme kareleri, dalga biçimleri, önizleme kopyaları (14 gün kullanılmayan silinir)
-- `models\` — konuşma modelleri; `engines\whisper\` — (kurulumla gelmediyse) indirilen whisper.cpp
+- `models\` — konuşma modelleri; `ocr\` — OCR dil verileri; `engines\whisper\` — (kurulumla gelmediyse) indirilen whisper.cpp
 
 ## Geliştirme
 
@@ -65,13 +66,13 @@ node test/mock-server.js 8787
 CVM_API=http://127.0.0.1:8787 npm start
 ```
 
-Testler (dönüştürme motoru, senkron, çalıştırıcı, konuşma modülü — whisper taklidiyle):
+Testler (dönüştürme motoru, senkron, çalıştırıcı, konuşma modülü — whisper taklidiyle —, gerçek Tesseract ile OCR):
 
 ```bash
 npm test
 ```
 
-Ortam değişkenleri: `CVM_API` (hesap sunucusu), `CVM_FFMPEG` (başka bir ffmpeg), `CVM_WHISPER_CLI` (yerel whisper-cli; Windows dışında konuşma için gerekir), `CVM_WHISPER_VERSION`.
+Ortam değişkenleri: `CVM_API` (hesap sunucusu), `CVM_OCR_LANG_BASE` (OCR dil verisi kaynağı; testlerde `node_modules/@tesseract.js-data`), `CVM_FFMPEG` (başka bir ffmpeg), `CVM_WHISPER_CLI` (yerel whisper-cli; Windows dışında konuşma için gerekir), `CVM_WHISPER_VERSION`.
 
 ## Exe derleme
 
@@ -101,6 +102,7 @@ Convert Master MIT lisanslıdır. Birlikte dağıtılan bileşenler:
 
 - **FFmpeg** — [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) üzerinden gelen derleme **GPL** lisanslıdır (libx264, libx265 gibi GPL bileşenleri içerir). FFmpeg ayrı bir program olarak çalıştırılır; kaynak kodu https://ffmpeg.org adresindedir. Dağıtımda FFmpeg lisansına (GPL v3) uyulmalıdır.
 - **sharp / libvips** — Apache-2.0 / LGPL-3.0.
+- **tesseract.js / Tesseract OCR** — Apache-2.0; dil verileri (tessdata) Apache-2.0.
 - **whisper.cpp** — MIT. **Whisper modelleri** (OpenAI) — MIT; ggml dönüşümleri Hugging Face › ggerganov/whisper.cpp'den indirilir.
 - **Electron / Chromium** — MIT ve Chromium lisansları.
 

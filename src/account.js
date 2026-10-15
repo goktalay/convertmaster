@@ -259,8 +259,8 @@ function createAccount(deps) {
   // Senkronlanan proje alanları (sözleşme: kind "project"). Kaynak yolu, seçim ve çıktılar cihaza özgüdür
   // (store.local[projeId]) ve gönderilmez.
   const PROJECT_FIELDS = ['createdAt', 'name', 'type', 'sourceExts', 'targetExt', 'sourceMode', 'includeSubfolders', 'concurrency',
-    'speech', 'options', 'folderId', 'color', 'notes'];
-  const SETTINGS_FIELDS = ['appTheme', 'language', 'defaultConcurrency', 'speechModel', 'speechConcurrency'];
+    'speech', 'ocr', 'options', 'folderId', 'color', 'notes'];
+  const SETTINGS_FIELDS = ['appTheme', 'language', 'defaultConcurrency', 'speechModel', 'speechConcurrency', 'ocrLanguages'];
   const SETTINGS_ID = 'settings';
 
   // Yerel deponun o anki halinden öğe verileri

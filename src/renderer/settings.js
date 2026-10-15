@@ -111,10 +111,72 @@ function speechModelsBox() {
 const OSS = [
   ['Convert Master', 'MIT'], ['Electron', 'MIT'], ['Chromium', 'BSD-3-Clause +'], ['Node.js', 'MIT'],
   ['FFmpeg (ffmpeg-static)', 'GPL-3.0'], ['sharp', 'Apache-2.0'], ['libvips', 'LGPL-3.0'],
-  ['whisper.cpp', 'MIT'], ['Whisper models (OpenAI)', 'MIT'], ['extract-zip', 'BSD-2-Clause'],
+  ['whisper.cpp', 'MIT'], ['Whisper models (OpenAI)', 'MIT'], ['tesseract.js / Tesseract OCR', 'Apache-2.0'], ['extract-zip', 'BSD-2-Clause'],
 ];
 
 // Bölümlü ayarlar penceresi (Mastertool standardı): Genel · Hesap · Dönüştürme · Konuşma · Depolama · Hakkında
+// OCR dil verileri (yüklü / indir / sil); getSelected verilirse önce seçili diller gösterilir
+function ocrLangsBox(getSelected) {
+  const box = h('<div class="models"></div>');
+  let st = null;
+  let dl = null;
+  const paint = () => {
+    if (!st) return;
+    box.innerHTML = '';
+    const sel = getSelected ? getSelected() : [];
+    const list = getSelected ? sel : FORMATS.OCR_LANGS;
+    for (const k of list) {
+      const m = st.langs[k] || {};
+      const busy = st.downloading.includes(k) || (dl && dl.lang === k);
+      const row = h(`<div class="model-row"><span class="model-name">${esc(langName(FORMATS.OCR_ISO[k]))}</span>
+        <span class="model-sub">${m.installed ? esc(t('speech.installed', { size: formatSize(m.size) })) : esc(t('ocr.notInstalled'))}</span><span class="model-act"></span></div>`);
+      const act = row.querySelector('.model-act');
+      if (busy) {
+        const pct = dl && dl.lang === k ? Math.round(dl.progress * 100) : 0;
+        act.appendChild(h(`<div class="progress mini"><div style="width:${pct}%"></div></div>`));
+        const c = h(`<button class="btn sm ghost" type="button">${esc(t('common.cancel'))}</button>`);
+        c.onclick = () => window.api.ocrCancelDownload(k);
+        act.appendChild(c);
+      } else if (m.installed) {
+        const b = h(`<button class="btn sm ghost danger" type="button">${icon('trash')}${esc(t('common.delete'))}</button>`);
+        b.onclick = async () => { await window.api.ocrDelete(k); refresh(); };
+        act.appendChild(b);
+      } else {
+        const b = h(`<button class="btn sm" type="button">${icon('download')}${esc(t('speech.download'))}</button>`);
+        b.onclick = async () => {
+          st.downloading.push(k);
+          paint();
+          const r = await window.api.ocrDownload(k);
+          if (!r.ok) toast(t('ocr.downloadFailed'), { type: 'err', sub: r.message, timeout: 8000 });
+          refresh();
+        };
+        act.appendChild(b);
+      }
+      box.appendChild(row);
+    }
+  };
+  const refresh = async () => { st = await window.api.ocrStatus(); paint(); };
+  const off = window.api.onSpeechDownload((x) => {
+    if (!box.isConnected) return off();
+    const prev = dl;
+    dl = x && x.what === 'ocr' ? x : null;
+    if (!x && prev) refresh(); else paint();
+  });
+  document.addEventListener('ocr-langs-changed', () => box.isConnected && paint());
+  refresh();
+  return box;
+}
+
+const langName = (() => {
+  let dn = null;
+  try { dn = new Intl.DisplayNames([LANG], { type: 'language' }); } catch { /* eski motor */ }
+  return (code) => {
+    if (!code) return '';
+    if (code === 'auto') return t('speech.langAuto');
+    try { const n = dn && dn.of(code); return n ? n.charAt(0).toLocaleUpperCase(LANG) + n.slice(1) : code; } catch { return code; }
+  };
+})();
+
 async function openSettings(s, startTab = 'general') {
   let appTheme = s.appTheme || 'system';
   const about = await window.api.about();
@@ -125,6 +187,7 @@ async function openSettings(s, startTab = 'general') {
     ['account', 'user', t('set.account')],
     ['conversion', 'layers', t('set.conversion')],
     ['speech', 'mic', t('set.speech')],
+    ['ocr', 'text', t('set.ocr')],
     ['storage', 'hdd', t('set.storage')],
     ['about', 'bolt', t('set.about')],
   ];
@@ -183,6 +246,14 @@ async function openSettings(s, startTab = 'general') {
         <small class="set-hint">${esc(t('pf.speechNote'))}</small>
       </section>
 
+      <section data-page="ocr">
+        <div class="field"><label>${esc(t('set.ocrLangs'))}</label><div class="ext-chips" id="s-ocr-langs"></div>
+          <small class="set-hint">${esc(t('pf.ocrLangsHint'))}</small></div>
+        <div class="section-title">${esc(t('pf.ocrData'))}</div>
+        <div id="s-ocr-models"></div>
+        <small class="set-hint">${esc(t('pf.ocrNote'))}</small>
+      </section>
+
       <section data-page="storage">
         <div class="storage" id="s-storage"><div class="empty-note">…</div></div>
       </section>
@@ -217,6 +288,22 @@ async function openSettings(s, startTab = 'general') {
   body.querySelectorAll('.set-nav button').forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
   showTab(startTab);
   q('#s-models').replaceWith(speechModelsBox());
+  q('#s-ocr-models').replaceWith(ocrLangsBox());
+  let ocrLangs = [...(s.ocrLanguages || FORMATS.defaultOcr().languages)];
+  const paintOcrLangs = () => {
+    const el = q('#s-ocr-langs');
+    el.innerHTML = '';
+    for (const l of FORMATS.OCR_LANGS) {
+      const b = h(`<button type="button" class="ext-chip all ${ocrLangs.includes(l) ? 'on' : ''}">${esc(langName(FORMATS.OCR_ISO[l]))}</button>`);
+      b.onclick = () => {
+        if (ocrLangs.includes(l)) { if (ocrLangs.length > 1) ocrLangs = ocrLangs.filter((x) => x !== l); }
+        else if (ocrLangs.length < 6) ocrLangs = [...ocrLangs, l];
+        paintOcrLangs();
+      };
+      el.appendChild(b);
+    }
+  };
+  paintOcrLangs();
 
   // Depolama: boyutlar ve temizlik (anında uygulanır)
   const paintStorage = async () => {
@@ -300,6 +387,7 @@ async function openSettings(s, startTab = 'general') {
           defaultConcurrency: clamp(q('#s-conc').value, 1, 32, 2),
           speechConcurrency: clamp(q('#s-sconc').value, 1, 4, 1),
           speechModel: q('#s-model').value,
+          ocrLanguages: ocrLangs,
         }),
       },
     ],

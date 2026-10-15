@@ -2,18 +2,10 @@
 
 // Proje formu: "Yeni" (ana pencere) ve "Proje ayarları" (ana pencere ve proje penceresi).
 // Akış: Proje İsmi → Tür (Video / Resim / Ses) → kaynak ve hedef uzantı → Dosya / Klasör → seçim
-//       → aynı anda kaç dosya → (video/seste) konuşmayı metne çevir → Kaydet.
+//       → aynı anda kaç dosya → (video/seste) konuşmayı metne çevir / (resimde) OCR — ikisi de isteğe bağlı → Kaydet.
 
 const TYPE_ICONS = { video: 'video', image: 'image', audio: 'audio' };
-const langName = (() => {
-  let dn = null;
-  try { dn = new Intl.DisplayNames([LANG], { type: 'language' }); } catch { /* eski motor */ }
-  return (code) => {
-    if (!code) return '';
-    if (code === 'auto') return t('speech.langAuto');
-    try { const n = dn && dn.of(code); return n ? n.charAt(0).toLocaleUpperCase(LANG) + n.slice(1) : code; } catch { return code; }
-  };
-})();
+// langName: settings.js
 
 const optList = (list, v) => list.map(([k, l]) => `<option value="${esc(k)}" ${String(k) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('');
 
@@ -31,11 +23,14 @@ async function editProject(project, { folderId = null, folders = null, settings 
   const p = JSON.parse(JSON.stringify(project || {
     name: '', type: 'video', sourceExts: [...FORMATS.TYPES.video.defaultSource], targetExt: FORMATS.TYPES.video.defaultTarget,
     sourceMode: 'folder', includeSubfolders: true, concurrency: settings.defaultConcurrency || 2,
-    speech: { ...FORMATS.defaultSpeech(), model: settings.speechModel || 'base' }, options: FORMATS.defaultOptions(), folderId, sourcePath: '',
+    speech: { ...FORMATS.defaultSpeech(), model: settings.speechModel || 'base' },
+    ocr: { ...FORMATS.defaultOcr(), languages: settings.ocrLanguages || FORMATS.defaultOcr().languages },
+    options: FORMATS.defaultOptions(), folderId, sourcePath: '',
   }));
   p.options = { ...FORMATS.defaultOptions(), ...(p.options || {}) };
   for (const k of ['video', 'image', 'audio']) p.options[k] = { ...FORMATS.defaultOptions()[k], ...(p.options[k] || {}) };
   p.speech = { ...FORMATS.defaultSpeech(), ...(p.speech || {}) };
+  p.ocr = { ...FORMATS.defaultOcr(), languages: settings.ocrLanguages || FORMATS.defaultOcr().languages, ...(p.ocr || {}) };
   let sourcePath = p.sourcePath || '';
 
   const folderSelect = () => {
@@ -55,6 +50,7 @@ async function editProject(project, { folderId = null, folders = null, settings 
       <button type="button" data-tab="general" class="on">${icon('layers')}${esc(t('pf.tabGeneral'))}</button>
       <button type="button" data-tab="output">${icon('gear')}${esc(t('pf.tabOutput'))}</button>
       <button type="button" data-tab="speech">${icon('mic')}${esc(t('pf.tabSpeech'))}</button>
+      <button type="button" data-tab="ocr">${icon('text')}${esc(t('pf.tabOcr'))}</button>
     </div>
 
     <div class="tab-panel" data-panel="general">
@@ -85,11 +81,22 @@ async function editProject(project, { folderId = null, folders = null, settings 
           <small class="hint">${esc(t('pf.concurrencyHint'))}</small></div>
         ${folders ? `<div class="field"><label>${esc(t('pf.folder'))}</label><select class="input" id="pf-folder">${folderSelect()}</select></div>` : '<div></div>'}
       </div>
+      <label class="speech-ask check hidden" id="pf-ocr-ask"><input type="checkbox" id="pf-ocr" ${p.ocr.enabled ? 'checked' : ''}>
+        <span>${icon('text', 'si')}</span><span><b>${esc(t('pf.ocrAsk'))}</b><small>${esc(t('pf.ocrAskHint'))}</small></span></label>
       <label class="speech-ask check" id="pf-speech-ask"><input type="checkbox" id="pf-speech" ${p.speech.enabled ? 'checked' : ''}>
         <span>${icon('mic', 'si')}</span><span><b>${esc(t('pf.speechAsk'))}</b><small>${esc(t('pf.speechAskHint'))}</small></span></label>
     </div>
 
     <div class="tab-panel hidden" data-panel="output"></div>
+
+    <div class="tab-panel hidden" data-panel="ocr">
+      <label class="check"><input type="checkbox" id="pf-ocr2"><span>${esc(t('pf.ocrAsk'))}<small>${esc(t('pf.ocrAskHint'))}</small></span></label>
+      <div class="field"><div class="hint-line"><label>${esc(t('pf.ocrLangs'))}</label></div><div class="ext-chips" id="pf-ocr-langs"></div>
+        <small class="hint">${esc(t('pf.ocrLangsHint'))}</small></div>
+      <div class="section-title">${esc(t('pf.ocrData'))}</div>
+      <div id="pf-ocr-models"></div>
+      <small class="hint">${esc(t('pf.ocrNote'))}</small>
+    </div>
 
     <div class="tab-panel hidden" data-panel="speech">
       <label class="check"><input type="checkbox" id="pf-speech2"><span>${esc(t('pf.speechAsk'))}<small>${esc(t('pf.speechAskHint'))}</small></span></label>
@@ -107,6 +114,24 @@ async function editProject(project, { folderId = null, folders = null, settings 
   </div>`);
   const q = (s) => body.querySelector(s);
   q('#pf-models').replaceWith(speechModelsBox());
+  q('#pf-ocr-models').replaceWith(ocrLangsBox(() => p.ocr.languages));
+
+  // OCR dilleri (en çok 6; Tesseract birden çok dili aynı anda okuyabilir)
+  const paintOcrLangs = () => {
+    const el = q('#pf-ocr-langs');
+    el.innerHTML = '';
+    for (const l of FORMATS.OCR_LANGS) {
+      const b = h(`<button type="button" class="ext-chip all ${p.ocr.languages.includes(l) ? 'on' : ''}">${esc(langName(FORMATS.OCR_ISO[l]))}</button>`);
+      b.onclick = () => {
+        if (p.ocr.languages.includes(l)) { if (p.ocr.languages.length > 1) p.ocr.languages = p.ocr.languages.filter((x) => x !== l); }
+        else if (p.ocr.languages.length < 6) p.ocr.languages = [...p.ocr.languages, l];
+        paintOcrLangs();
+        document.dispatchEvent(new Event('ocr-langs-changed'));
+      };
+      el.appendChild(b);
+    }
+  };
+  paintOcrLangs();
 
   // --- Sekmeler
   const showTab = (name) => {
@@ -190,9 +215,12 @@ async function editProject(project, { folderId = null, folders = null, settings 
       src.appendChild(b);
     }
     q('#pf-target').innerHTML = targetOptions(p.type, p.targetExt);
+    // Video/seste konuşmadan metne, resimde OCR seçeneği sunulur (ikisi de isteğe bağlı)
     const speechOk = p.type !== 'image';
     q('#pf-speech-ask').classList.toggle('hidden', !speechOk);
+    q('#pf-ocr-ask').classList.toggle('hidden', speechOk);
     body.querySelector('[data-tab="speech"]').classList.toggle('hidden', !speechOk);
+    body.querySelector('[data-tab="ocr"]').classList.toggle('hidden', speechOk);
     paintAll();
     paintOutput();
   };
@@ -258,6 +286,15 @@ async function editProject(project, { folderId = null, folders = null, settings 
   q('#pf-speech').onchange = (e) => setSpeech(e.target.checked);
   q('#pf-speech2').onchange = (e) => setSpeech(e.target.checked);
   setSpeech(!!p.speech.enabled);
+  const setOcr = (on) => {
+    p.ocr.enabled = on;
+    q('#pf-ocr').checked = on;
+    q('#pf-ocr2').checked = on;
+    q('#pf-ocr-ask').classList.toggle('on', on);
+  };
+  q('#pf-ocr').onchange = (e) => setOcr(e.target.checked);
+  q('#pf-ocr2').onchange = (e) => setOcr(e.target.checked);
+  setOcr(!!p.ocr.enabled);
 
   paintType();
   paintMode();
@@ -279,6 +316,7 @@ async function editProject(project, { folderId = null, folders = null, settings 
             id: project ? project.id : undefined, name, type: p.type, sourceExts: p.sourceExts, targetExt: q('#pf-target').value,
             sourceMode: p.sourceMode, includeSubfolders: q('#pf-sub').checked,
             concurrency: Number(q('#pf-conc').value) || 2, folderId: folders ? q('#pf-folder').value || null : p.folderId,
+            ocr: { enabled: p.type === 'image' && q('#pf-ocr').checked, languages: p.ocr.languages },
             speech: { enabled: p.type !== 'image' && q('#pf-speech').checked, model: q('#pf-model').value, language: q('#pf-lang').value, perWindow: q('#pf-window').checked },
             options: readOutput(), color: p.color, notes: p.notes || '', sourcePath,
           };
