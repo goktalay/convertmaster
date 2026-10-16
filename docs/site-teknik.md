@@ -164,8 +164,9 @@ Kaynak dosyalarınıza hiç dokunulmaz. Temizleme: proje kartında ya da proje p
 
 ## Sürüm geçmişi
 
-### Yayınlanmamış (main)
+### 1.1.0 — 16 Ekim 2026
 
+- **Ortak oturum (tek giriş):** herhangi bir Mastertool uygulamasında bir kez giriş yapıldıysa Convert Master şifre sormadan açılır; birinde çıkış yapılınca hepsinde çıkış yapılır (yerel veriler korunur; süren dönüştürmede "şimdi / bitince" sorulur). Ortak kimlik Windows Kimlik Bilgisi Yöneticisi'nde. İkinci kez çalıştırma (Master Tool tepsisi) gizli pencereyi gösterir.
 - **Resimden metin (OCR)**, isteğe bağlı: tesseract.js 7, 21 dil, projede en çok 6 dil; satır · güven · metin paneli, satırın resimde vurgulanması, Tümünü kopyala, TXT/CSV/JSON.
 - Konuşmadan metne ve OCR seçenekleri ayrı ayrı; ikisi de varsayılan kapalı.
 - Önizleme: büyük resim ve videolar alana sığdırılıyor (önceden kırpılabiliyordu).
