@@ -1,7 +1,7 @@
 {
   "name": "convert-master",
   "productName": "Convert Master",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Video, resim ve ses dönüştürücü; konuşmadan metne (Mastertool ailesi)",
   "main": "src/main.js",
   "author": "Convert Master",

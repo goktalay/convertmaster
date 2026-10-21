@@ -164,7 +164,7 @@ Kaynak dosyalarınıza hiç dokunulmaz. Temizleme: proje kartında ya da proje p
 
 ## Sürüm geçmişi
 
-### Yayınlanmamış (main)
+### 1.2.0 — 21 Ekim 2026
 
 - **Kalite ve boyut** (video ve resim): platform hazır ayarları (YouTube 16:9, Reels/TikTok/Shorts 9:16 1080×1920, Instagram 4:5 ve 1:1, WhatsApp, e-posta, arşiv; resimde Instagram, hikâye, YouTube küçük resmi, profil fotoğrafı, web), en-boy oranı (16:9, 9:16, 1:1, 4:5, 4:3, 3:4, 21:9, özel), sığdır (siyah/beyaz/bulanık/saydam dolgu) / kırp / uzat, 90°/180° döndürme, canlı çıktı boyutu.
 
