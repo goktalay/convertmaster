@@ -9,6 +9,28 @@ const TYPE_ICONS = { video: 'video', image: 'image', audio: 'audio' };
 
 const optList = (list, v) => list.map(([k, l]) => `<option value="${esc(k)}" ${String(k) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('');
 
+// --- Kalite ve boyut: en-boy oranı şekilleri, hazır ayar adları ---------------------------
+const AR_WORD = { '16:9': 'landscape', '9:16': 'portrait', '1:1': 'square', '4:5': 'portrait', '4:3': 'classic', '3:4': 'portrait', '21:9': 'cinema' };
+const aspectLabel = (a) => (a === 'source' ? t('out.ar.source') : a === 'custom' ? t('out.ar.custom') : `${a} · ${t(`out.ar.${AR_WORD[a]}`)}`);
+// Oranı gösteren küçük dikdörtgen (kaynak/özel kesikli kenarlı)
+function arShape(a, text = '') {
+  const [w, h] = /^\d+:\d+$/.test(a) ? a.split(':').map(Number) : [4, 3];
+  const k = 26 / Math.max(w, h);
+  if (w * k < 24) text = ''; // dar (dikey) şekle yazı sığmaz
+  return `<span class="ar-shape ${/^\d/.test(a) ? '' : 'loose'}" style="width:${Math.round(w * k)}px;height:${Math.round(h * k)}px">${esc(text)}</span>`;
+}
+function presetDesc(type, pr) {
+  const o = { ...FORMATS.defaultOptions()[type], ...pr.o };
+  const f = FORMATS.frameSize(o, 0, 0, type === 'video');
+  return f ? `${o.aspect} · ${f.W}×${f.H}` : t(`preset.${pr.id}Desc`);
+}
+function presetTag(pr) {
+  if (pr.o.aspect) return pr.o.aspect;
+  if (pr.o.resolution && pr.o.resolution !== 'source') return `${pr.o.resolution}p`;
+  if (pr.o.maxWidth) return `${pr.o.maxWidth}`;
+  return 'HQ';
+}
+
 function targetOptions(type, v) {
   const T = FORMATS.TYPES[type];
   if (type !== 'video') return optList(T.target.map((x) => [x, x.toUpperCase()]), v);
@@ -66,6 +88,7 @@ async function editProject(project, { folderId = null, folders = null, settings 
         <div class="field"><label>${esc(t('pf.targetExt'))}</label><select class="input" id="pf-target"></select>
           <small class="hint" id="pf-target-hint"></small></div>
       </div>
+      <div class="out-sum">${icon('gauge')}<span>${esc(t('pf.tabOutput'))}:</span><b id="pf-outsum"></b><a id="pf-outgo">${esc(t('pf.change'))}</a></div>
       <div class="field"><label>${esc(t('pf.source'))}</label>
         <div class="seg" id="pf-mode">
           <button type="button" data-v="file">${icon('file')}${esc(t('pf.modeFile'))}</button>
@@ -139,53 +162,156 @@ async function editProject(project, { folderId = null, folders = null, settings 
     body.querySelectorAll('.tab-panel').forEach((x) => x.classList.toggle('hidden', x.dataset.panel !== name));
   };
   body.querySelectorAll('.tabs button').forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+  q('#pf-outgo').onclick = () => showTab('output');
 
-  // --- Dönüştürme ayarları (türe göre)
-  const readOutput = () => {
+  // --- Kalite ve boyut (türe göre). st: o anki türün seçenekleri; en-boy ve yerleştirme düğmeleri doğrudan st'yi değiştirir
+  let st = null;
+  const syncFromDom = () => {
     const o = JSON.parse(JSON.stringify(p.options));
     const v = (id) => { const el = q(id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined; };
-    if (p.type === 'video') {
-      Object.assign(o.video, { quality: v('#o-q'), resolution: v('#o-res'), fps: v('#o-fps'), codec: v('#o-codec'), speed: v('#o-speed'), audioBitrate: v('#o-ab'), noAudio: v('#o-noa') });
-    } else if (p.type === 'image') {
-      Object.assign(o.image, { quality: Number(v('#o-iq')), maxWidth: Number(v('#o-w')) || 0, maxHeight: Number(v('#o-h')) || 0, keepMeta: v('#o-meta') });
-    } else {
-      Object.assign(o.audio, { bitrate: v('#o-br'), sampleRate: v('#o-sr'), channels: v('#o-ch') });
+    const set = (obj, k, val) => { if (val !== undefined) obj[k] = val; };
+    if (p.type === 'video' && st) {
+      for (const [k, id] of [['quality', '#o-q'], ['resolution', '#o-res'], ['fps', '#o-fps'], ['codec', '#o-codec'], ['speed', '#o-speed'],
+        ['audioBitrate', '#o-ab'], ['noAudio', '#o-noa'], ['padColor', '#o-pad'], ['rotate', '#o-rot']]) set(st, k, v(id));
+    } else if (p.type === 'image' && st) {
+      for (const [k, id] of [['size', '#o-size'], ['keepMeta', '#o-meta'], ['padColor', '#o-pad'], ['rotate', '#o-rot']]) set(st, k, v(id));
+      if (q('#o-iq')) st.quality = Number(v('#o-iq'));
+      if (q('#o-w')) { st.maxWidth = Number(v('#o-w')) || 0; st.maxHeight = Number(v('#o-h')) || 0; }
     }
+    if (st && q('#o-cw')) { st.width = Number(v('#o-cw')) || st.width; st.height = Number(v('#o-ch2')) || st.height; }
+    if (p.type === 'audio') Object.assign(o.audio, { bitrate: v('#o-br'), sampleRate: v('#o-sr'), channels: v('#o-ch') });
+    else if (st) o[p.type] = { ...st };
     return o;
   };
+  const readOutput = syncFromDom;
+
+  const outSummary = (o) => {
+    if (p.type === 'audio') return `${o.audio.bitrate} kbps`;
+    const x = o[p.type];
+    const parts = [];
+    if (x.preset && x.preset !== 'custom') parts.push(t(`preset.${x.preset}`));
+    else {
+      const f = FORMATS.frameSize(x, 0, 0, p.type === 'video');
+      if (x.aspect && x.aspect !== 'source') parts.push(f ? `${aspectLabel(x.aspect)} · ${f.W}×${f.H}` : aspectLabel(x.aspect));
+      else if (p.type === 'video' && x.resolution !== 'source') parts.push(`${x.resolution}p`);
+      else if (p.type === 'image' && (x.maxWidth || x.maxHeight)) parts.push(`≤ ${x.maxWidth || '∞'}×${x.maxHeight || '∞'}`);
+      else parts.push(t('out.asSource'));
+      if (Number(x.rotate)) parts.push(t(`out.rot.${x.rotate}`));
+    }
+    parts.push(p.type === 'video' ? t(`out.q.${x.quality}`).replace(/\s*\(.*\)$/, '') : `${t('out.imgQuality')} ${x.quality}`);
+    return parts.join(' · ');
+  };
+  const paintSummary = () => { q('#pf-outsum').textContent = outSummary(readOutput()); };
+
+  // Hazır ayar kartları + boyut/oran bölümü (video ve resim ortak)
+  const frameHtml = (type, v) => {
+    const presets = FORMATS.PRESETS[type];
+    const pads = type === 'image' ? FORMATS.PAD_COLORS : FORMATS.PAD_COLORS.filter((c) => c !== 'transparent');
+    const sizeSel = type === 'video'
+      ? `<select class="input" id="o-res">${optList(FORMATS.RESOLUTIONS.map((k) => [k, k === 'source' ? t('out.asSource') : `${k}p`]), v.resolution)}</select>`
+      : `<select class="input" id="o-size">${optList(FORMATS.IMAGE_SIZES.map((k) => [k, k === 'source' ? t('out.asSource') : `${k} px`]), v.size)}</select>`;
+    return `
+      <div class="section-title">${esc(t('out.presets'))}</div>
+      <div class="presets" id="o-presets">
+        <button type="button" class="preset" data-p="custom">${arShape('custom', '✎')}<span><b>${esc(t('out.presetCustom'))}</b><small>${esc(t('out.presetCustomDesc'))}</small></span></button>
+        ${presets.map((pr) => `<button type="button" class="preset" data-p="${pr.id}">${arShape(pr.o.aspect || '16:9', presetTag(pr))}
+          <span><b>${esc(t(`preset.${pr.id}`))}</b><small>${esc(presetDesc(type, pr))}</small></span></button>`).join('')}
+      </div>
+      <div class="section-title">${esc(t('out.frame'))}</div>
+      <div class="aspects" id="o-ar">${FORMATS.ASPECTS.map((a) => `<button type="button" class="ar-chip" data-v="${a}">${arShape(a, a === 'custom' ? '…' : '')}<span>${esc(aspectLabel(a))}</span></button>`).join('')}</div>
+      <div class="row c-1-1">
+        <div class="field" id="o-size-f"><label id="o-size-l"></label>${sizeSel}<small class="hint" id="o-size-hint"></small></div>
+        <div class="field hidden" id="o-custom-f"><label>${esc(t('out.width'))} × ${esc(t('out.height'))}</label>
+          <div class="wh"><div class="unit-wrap"><input class="input" id="o-cw" type="number" min="16" max="8192" value="${esc(v.width)}"><span>px</span></div><b>×</b>
+          <div class="unit-wrap"><input class="input" id="o-ch2" type="number" min="16" max="8192" value="${esc(v.height)}"><span>px</span></div></div></div>
+        <div class="field"><label>${esc(t('out.rotate'))}</label><select class="input" id="o-rot">${optList(FORMATS.ROTATIONS.map((r) => [r, t(`out.rot.${r}`)]), String(v.rotate || '0'))}</select></div>
+      </div>
+      ${type === 'image' ? `<div class="row c-1-1" id="o-limit">
+          <div class="field"><label>${esc(t('out.maxWidth'))}</label><div class="unit-wrap"><input class="input" id="o-w" type="number" min="0" max="20000" value="${esc(v.maxWidth || '')}" placeholder="${esc(t('out.noLimit'))}"><span>px</span></div></div>
+          <div class="field"><label>${esc(t('out.maxHeight'))}</label><div class="unit-wrap"><input class="input" id="o-h" type="number" min="0" max="20000" value="${esc(v.maxHeight || '')}" placeholder="${esc(t('out.noLimit'))}"><span>px</span></div></div>
+        </div>` : ''}
+      <div class="row c-1-1" id="o-fit-row">
+        <div class="field"><label>${esc(t('out.fit'))}</label>
+          <div class="seg" id="o-fit">${FORMATS.FITS.map((f) => `<button type="button" data-v="${f}">${esc(t(`out.fit.${f}`))}</button>`).join('')}</div>
+          <small class="hint" id="o-fit-hint"></small></div>
+        <div class="field" id="o-pad-f"><label>${esc(t('out.padColor'))}</label><select class="input" id="o-pad">${optList(pads.map((c) => [c, t(`out.pad.${c}`)]), v.padColor)}</select></div>
+      </div>
+      <div class="out-size" id="o-outsize"></div>`;
+  };
+
+  // Görünürlük, seçili düğmeler, çıktı boyutu satırı
+  const paintFrame = () => {
+    const type = p.type;
+    syncFromDom();
+    const framed = st.aspect && st.aspect !== 'source';
+    const custom = st.aspect === 'custom';
+    body.querySelectorAll('#o-presets .preset').forEach((b) => b.classList.toggle('on', b.dataset.p === (st.preset || 'custom')));
+    body.querySelectorAll('#o-ar .ar-chip').forEach((b) => b.classList.toggle('on', b.dataset.v === (st.aspect || 'source')));
+    body.querySelectorAll('#o-fit button').forEach((b) => b.classList.toggle('on', b.dataset.v === st.fit));
+    q('#o-size-f').classList.toggle('hidden', custom || (type === 'image' && !framed));
+    q('#o-custom-f').classList.toggle('hidden', !custom);
+    if (q('#o-limit')) q('#o-limit').classList.toggle('hidden', framed);
+    q('#o-fit-row').classList.toggle('hidden', !framed);
+    q('#o-pad-f').classList.toggle('hidden', st.fit !== 'pad');
+    q('#o-fit-hint').textContent = t(`out.fitHint.${st.fit}`);
+    q('#o-size-l').textContent = framed ? t('out.shortSide') : t('out.resolution');
+    q('#o-size-hint').textContent = framed ? t('out.frameHint') : type === 'video' ? t('out.resolutionHint') : '';
+    const f = FORMATS.frameSize(st, 0, 0, type === 'video');
+    q('#o-outsize').innerHTML = f ? `${icon('crosshair')}${esc(t('out.outputSize', { w: f.W, h: f.H }))}`
+      : `${icon('info')}${esc(framed ? t('out.outputShortSource') : t('out.outputSource'))}`;
+    paintSummary();
+  };
+  const bindFrame = () => {
+    const changed = () => { st.preset = 'custom'; paintFrame(); };
+    body.querySelectorAll('#o-presets .preset').forEach((b) => (b.onclick = () => {
+      syncFromDom();
+      st = b.dataset.p === 'custom' ? { ...st, preset: 'custom' } : FORMATS.applyPreset(p.type, st, b.dataset.p);
+      p.options = { ...p.options, [p.type]: st };
+      paintOutput();
+    }));
+    body.querySelectorAll('#o-ar .ar-chip').forEach((b) => (b.onclick = () => { syncFromDom(); st.aspect = b.dataset.v; changed(); }));
+    body.querySelectorAll('#o-fit button').forEach((b) => (b.onclick = () => { syncFromDom(); st.fit = b.dataset.v; changed(); }));
+    for (const id of ['#o-res', '#o-size', '#o-rot', '#o-pad', '#o-cw', '#o-ch2', '#o-w', '#o-h', '#o-q', '#o-fps', '#o-ab', '#o-iq', '#o-speed']) {
+      const el = q(id);
+      if (el) el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', changed);
+    }
+  };
+
   const paintOutput = () => {
     const el = q('[data-panel="output"]');
     const o = p.options;
+    st = p.type === 'audio' ? null : { ...o[p.type] };
     if (p.type === 'video') {
       const v = o.video;
       el.innerHTML = `
+        ${frameHtml('video', v)}
+        <div class="section-title">${esc(t('out.qualitySection'))}</div>
         <div class="row c-1-1">
           <div class="field"><label>${esc(t('out.quality'))}</label><select class="input" id="o-q">${optList(FORMATS.QUALITY.map((k) => [k, t(`out.q.${k}`)]), v.quality)}</select></div>
-          <div class="field"><label>${esc(t('out.resolution'))}</label><select class="input" id="o-res">${optList(FORMATS.RESOLUTIONS.map((k) => [k, k === 'source' ? t('out.asSource') : `${k}p`]), v.resolution)}</select>
-            <small class="hint">${esc(t('out.resolutionHint'))}</small></div>
+          <div class="field"><label>${esc(t('out.fps'))}</label><select class="input" id="o-fps">${optList(FORMATS.FPS.map((k) => [k, k === 'source' ? t('out.asSource') : `${k} fps`]), v.fps)}</select></div>
         </div>
         <div class="row c-1-1">
-          <div class="field"><label>${esc(t('out.fps'))}</label><select class="input" id="o-fps">${optList(FORMATS.FPS.map((k) => [k, k === 'source' ? t('out.asSource') : `${k} fps`]), v.fps)}</select></div>
           <div class="field"><label>${esc(t('out.codec'))}</label><select class="input" id="o-codec">${optList([['h264', t('out.h264')], ['h265', t('out.h265')]], v.codec)}</select>
             <small class="hint">${esc(t('out.codecHint'))}</small></div>
+          <div class="field"><label>${esc(t('out.speed'))}</label><select class="input" id="o-speed">${optList(['veryfast', 'fast', 'medium', 'slow'].map((k) => [k, t(`out.speed.${k}`)]), v.speed)}</select></div>
         </div>
         <div class="row c-1-1">
-          <div class="field"><label>${esc(t('out.speed'))}</label><select class="input" id="o-speed">${optList(['veryfast', 'fast', 'medium', 'slow'].map((k) => [k, t(`out.speed.${k}`)]), v.speed)}</select></div>
           <div class="field"><label>${esc(t('out.audioBitrate'))}</label><select class="input" id="o-ab">${optList(FORMATS.AUDIO_BITRATES.map((k) => [k, `${k} kbps`]), v.audioBitrate)}</select></div>
-        </div>
-        <label class="check"><input type="checkbox" id="o-noa" ${v.noAudio ? 'checked' : ''}><span>${esc(t('out.noAudio'))}</span></label>`;
+          <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" id="o-noa" ${v.noAudio ? 'checked' : ''}><span>${esc(t('out.noAudio'))}</span></label></div>
+        </div>`;
+      bindFrame();
+      paintFrame();
     } else if (p.type === 'image') {
       const v = o.image;
       el.innerHTML = `
+        ${frameHtml('image', v)}
+        <div class="section-title">${esc(t('out.qualitySection'))}</div>
         <div class="field"><label>${esc(t('out.imgQuality'))}: <b id="o-iqv">${v.quality}</b></label><input type="range" id="o-iq" min="1" max="100" value="${esc(v.quality)}">
           <small class="hint">${esc(t('out.imgQualityHint'))}</small></div>
-        <div class="row c-1-1">
-          <div class="field"><label>${esc(t('out.maxWidth'))}</label><div class="unit-wrap"><input class="input" id="o-w" type="number" min="0" max="20000" value="${esc(v.maxWidth || '')}" placeholder="${esc(t('out.noLimit'))}"><span>px</span></div></div>
-          <div class="field"><label>${esc(t('out.maxHeight'))}</label><div class="unit-wrap"><input class="input" id="o-h" type="number" min="0" max="20000" value="${esc(v.maxHeight || '')}" placeholder="${esc(t('out.noLimit'))}"><span>px</span></div></div>
-        </div>
-        <small class="hint">${esc(t('out.resizeHint'))}</small>
         <label class="check"><input type="checkbox" id="o-meta" ${v.keepMeta ? 'checked' : ''}><span>${esc(t('out.keepMeta'))}<small>${esc(t('out.keepMetaHint'))}</small></span></label>`;
-      q('#o-iq').oninput = (e) => (q('#o-iqv').textContent = e.target.value);
+      q('#o-iq').addEventListener('input', (e) => (q('#o-iqv').textContent = e.target.value));
+      bindFrame();
+      paintFrame();
     } else {
       const v = o.audio;
       el.innerHTML = `
@@ -195,6 +321,8 @@ async function editProject(project, { folderId = null, folders = null, settings 
           <div class="field"><label>${esc(t('out.sampleRate'))}</label><select class="input" id="o-sr">${optList(FORMATS.SAMPLE_RATES.map((k) => [k, k === 'source' ? t('out.asSource') : `${Number(k) / 1000} kHz`]), v.sampleRate)}</select></div>
         </div>
         <div class="field"><label>${esc(t('out.channels'))}</label><select class="input" id="o-ch">${optList([['source', t('out.asSource')], ['stereo', t('out.stereo')], ['mono', t('out.mono')]], v.channels)}</select></div>`;
+      for (const id of ['#o-br', '#o-sr', '#o-ch']) q(id).addEventListener('change', paintSummary);
+      paintSummary();
     }
   };
 

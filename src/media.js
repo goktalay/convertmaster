@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { extOf } = require('./formats');
+const { extOf, frameSize } = require('./formats');
 
 let sharp = null;
 function getSharp() {
@@ -82,6 +82,13 @@ function parseProbe(stderr) {
   const b = /bitrate:\s*(\d+)\s*kb\/s/.exec(stderr);
   if (b) info.bitrate = Number(b[1]);
   for (const line of stderr.split(/\r?\n/)) {
+    // Telefon videoları: ffmpeg görüntüyü kendiliğinden döndürür; 90° dönükse genişlik/yükseklik yer değiştirir
+    const rot = /rotation of (-?[\d.]+) degrees|rotate\s*:\s*(-?\d+)/.exec(line);
+    if (rot && info.video && !info.video.rotated) {
+      const deg = Math.abs(Math.round(Number(rot[1] || rot[2]))) % 180;
+      if (deg === 90) [info.video.width, info.video.height] = [info.video.height, info.video.width];
+      info.video.rotated = true;
+    }
     const m = /Stream #\d+:\d+(?:\[[^\]]*\])?(?:\([^)]*\))?:\s*(Video|Audio):\s*([^\s,]+)(.*)$/.exec(line);
     if (!m) continue;
     if (m[1] === 'Video' && !info.video) {
@@ -161,6 +168,28 @@ function scaleFilter(res) {
   return `scale='if(gt(iw,ih),-2,min(iw,${H}))':'if(gt(iw,ih),min(ih,${H}),-2)'`;
 }
 
+// Döndürme (saat yönünde 90 / 270 / 180)
+function rotateFilter(r) {
+  r = Number(r) || 0;
+  return r === 90 ? 'transpose=1' : r === 270 ? 'transpose=2' : r === 180 ? 'hflip,vflip' : null;
+}
+
+// En-boy oranına göre W×H kareye yerleştirme: sığdır (kenarlara dolgu: siyah/beyaz/bulanık/saydam), kırp, uzat.
+// Tek giriş tek çıkışlı bir zincirdir; -vf içinde ve -filter_complex zincirinin ortasında kullanılabilir.
+function frameFilter(o, W, H) {
+  const sz = `${W}:${H}`;
+  if (o.fit === 'stretch') return `scale=${sz},setsar=1`;
+  if (o.fit === 'crop') return `scale=${sz}:force_original_aspect_ratio=increase,crop=${sz},setsar=1`;
+  const fg = `scale=${sz}:force_original_aspect_ratio=decrease:force_divisible_by=2`;
+  if (o.padColor === 'blur') {
+    const r = Math.max(4, Math.min(40, Math.round(Math.min(W, H) / 40)));
+    return `split[cvb][cvf];[cvb]scale=${sz}:force_original_aspect_ratio=increase,crop=${sz},boxblur=${r}:3[cvbg];` +
+      `[cvf]${fg}[cvfg];[cvbg][cvfg]overlay=(W-w)/2:(H-h)/2,setsar=1`;
+  }
+  if (o.padColor === 'transparent') return `format=rgba,${fg},pad=${sz}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1`;
+  return `${fg},pad=${sz}:(ow-iw)/2:(oh-ih)/2:color=${o.padColor === 'white' ? 'white' : 'black'},setsar=1`;
+}
+
 function audioArgs(target, o) {
   const br = `${Number(o.bitrate || o.audioBitrate || 192)}k`;
   switch (target) {
@@ -198,7 +227,9 @@ async function videoArgs(target, o, info) {
   const enc = await encoders();
   const q = o.quality || 'medium';
   const vf = [];
-  const sf = scaleFilter(o.resolution);
+  const rf = rotateFilter(o.rotate);
+  const frame = info.video ? frameSize(o, info.video.width, info.video.height, true) : null;
+  const sf = frame ? frameFilter(o, frame.W, frame.H) : scaleFilter(o.resolution);
   const fps = o.fps && o.fps !== 'source' ? ['-r', String(o.fps)] : [];
   const ab = { audioBitrate: o.audioBitrate };
   const noA = o.noAudio || !info.audio;
@@ -211,8 +242,9 @@ async function videoArgs(target, o, info) {
   if (target === 'gif') {
     const w = o.resolution && o.resolution !== 'source' ? Number(o.resolution) : 480;
     const f = o.fps && o.fps !== 'source' ? Math.min(30, Number(o.fps)) : CRF.gifFps[q];
+    const shape = [rf, frame ? sf : `scale='min(iw,${w})':-2:flags=lanczos`].filter(Boolean).join(',');
     return ['-filter_complex',
-      `[0:v:0]fps=${f},scale='min(iw,${w})':-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a[g]`,
+      `[0:v:0]fps=${f},${shape},split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a[g]`,
       '-map', '[g]', '-an', '-loop', '0'];
   }
 
@@ -255,6 +287,7 @@ async function videoArgs(target, o, info) {
     }
   }
   // yuv420p ve çoğu kodlayıcı çift boyut ister
+  if (rf) vf.push(rf);
   vf.push(sf || "scale='trunc(iw/2)*2':'trunc(ih/2)*2'");
   const extra = ['mp4', 'm4v', 'mov'].includes(target) ? ['-movflags', '+faststart'] : [];
   return [...maps, ...v, '-vf', vf.join(','), ...fps, ...(noA ? [] : a), '-map_metadata', '0', ...extra];
@@ -274,8 +307,27 @@ async function sharpConvert(src, out, target, o) {
   const S = getSharp();
   const srcExt = extOf(src);
   const animated = ['gif', 'webp'].includes(srcExt) && ['gif', 'webp'].includes(target);
-  let img = S(src, { animated, density: srcExt === 'svg' ? 300 : undefined, limitInputPixels: false }).rotate();
-  if (o.maxWidth || o.maxHeight) {
+  const input = { animated, density: srcExt === 'svg' ? 300 : undefined, limitInputPixels: false };
+  let img = S(src, input).rotate();
+  const rot = Number(o.rotate) || 0;
+  if (rot) img = S(await img.toBuffer(), { animated, limitInputPixels: false }).rotate(rot);
+  const frame = o.aspect && o.aspect !== 'source' ? frameSize(o, ...(await imageDims(S, src, input))) : null;
+  if (frame) {
+    const { W, H } = frame;
+    if (o.fit === 'stretch') img = img.resize(W, H, { fit: 'fill' });
+    else if (o.fit === 'crop') img = img.resize(W, H, { fit: 'cover', position: animated ? 'centre' : S.strategy.attention });
+    else if (o.padColor === 'blur' && !animated) {
+      // Bulanık arka plan: aynı resim kareyi doldurup bulanıklaştırılır, üstüne resmin tamamı ortalanır
+      const base = await img.toBuffer();
+      const bg = await S(base).resize(W, H, { fit: 'cover' }).blur(Math.max(6, Math.round(Math.min(W, H) / 30))).toBuffer();
+      const fg = await S(base).resize(W, H, { fit: 'inside' }).toBuffer();
+      img = S(bg).composite([{ input: fg, gravity: 'centre' }]);
+    } else {
+      const transparent = o.padColor === 'transparent' && ['png', 'webp', 'avif', 'gif', 'tif', 'tiff'].includes(target);
+      const background = transparent ? { r: 0, g: 0, b: 0, alpha: 0 } : o.padColor === 'black' || o.padColor === 'blur' ? '#000000' : '#ffffff';
+      img = img.resize(W, H, { fit: 'contain', background });
+    }
+  } else if (o.maxWidth || o.maxHeight) {
     img = img.resize({ width: o.maxWidth || null, height: o.maxHeight || null, fit: 'inside', withoutEnlargement: true });
   }
   if (o.keepMeta) img = img.withMetadata();
@@ -292,9 +344,21 @@ async function sharpConvert(src, out, target, o) {
   await img.toFile(out);
 }
 
-function ffImageArgs(target, o) {
+// Kaynağın (EXIF yönüne göre düzeltilmiş) genişlik ve yüksekliği; animasyonda tek kare
+async function imageDims(S, src, input) {
+  const m = await S(src, input).metadata();
+  const w = m.width || 0;
+  const h = m.pageHeight || m.height || 0;
+  return (m.orientation || 1) >= 5 ? [h, w] : [w, h];
+}
+
+function ffImageArgs(target, o, dims) {
   const vf = [];
-  if (o.maxWidth || o.maxHeight) {
+  const rf = rotateFilter(o.rotate);
+  if (rf) vf.push(rf);
+  const frame = dims ? frameSize(o, dims[0], dims[1]) : null;
+  if (frame) vf.push(frameFilter(o, frame.W, frame.H));
+  else if (o.maxWidth || o.maxHeight) {
     const w = o.maxWidth || 100000;
     const hgt = o.maxHeight || 100000;
     vf.push(`scale='min(iw,${w})':'min(ih,${hgt})':force_original_aspect_ratio=decrease`);
@@ -313,7 +377,14 @@ function ffImageArgs(target, o) {
 async function imageConvert(src, out, target, o, signal) {
   const se = extOf(src);
   if (SHARP_READ.has(se) && SHARP_WRITE.has(target)) return sharpConvert(src, out, target, o);
-  if (FF_READ.has(se) && FF_WRITE.has(target)) return runFfmpeg(['-i', src, ...ffImageArgs(target, o), out], { signal });
+  if (FF_READ.has(se) && FF_WRITE.has(target)) {
+    let dims = null;
+    if (o.aspect && o.aspect !== 'source') {
+      const info = await probe(src);
+      if (info.video) dims = [info.video.width, info.video.height];
+    }
+    return runFfmpeg(['-i', src, ...ffImageArgs(target, o, dims), out], { signal });
+  }
   const mid = `${out}.stage.png`;
   try {
     if (FF_READ.has(se) && SHARP_WRITE.has(target)) {
@@ -321,7 +392,8 @@ async function imageConvert(src, out, target, o, signal) {
       await sharpConvert(mid, out, target, o);
     } else if (SHARP_READ.has(se) && FF_WRITE.has(target)) {
       await sharpConvert(src, mid, 'png', { ...o, quality: 100 });
-      await runFfmpeg(['-i', mid, ...ffImageArgs(target, { ...o, maxWidth: 0, maxHeight: 0 }), out], { signal });
+      // Boyutlandırma ve döndürme sharp aşamasında yapıldı
+      await runFfmpeg(['-i', mid, ...ffImageArgs(target, { ...o, maxWidth: 0, maxHeight: 0, aspect: 'source', rotate: 0 }), out], { signal });
     } else {
       throw new ConvertError('unsupported');
     }

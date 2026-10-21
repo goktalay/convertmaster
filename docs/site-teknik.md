@@ -164,6 +164,10 @@ Kaynak dosyalarınıza hiç dokunulmaz. Temizleme: proje kartında ya da proje p
 
 ## Sürüm geçmişi
 
+### Yayınlanmamış (main)
+
+- **Kalite ve boyut** (video ve resim): platform hazır ayarları (YouTube 16:9, Reels/TikTok/Shorts 9:16 1080×1920, Instagram 4:5 ve 1:1, WhatsApp, e-posta, arşiv; resimde Instagram, hikâye, YouTube küçük resmi, profil fotoğrafı, web), en-boy oranı (16:9, 9:16, 1:1, 4:5, 4:3, 3:4, 21:9, özel), sığdır (siyah/beyaz/bulanık/saydam dolgu) / kırp / uzat, 90°/180° döndürme, canlı çıktı boyutu.
+
 ### 1.1.0 — 16 Ekim 2026
 
 - **Ortak oturum (tek giriş):** herhangi bir Mastertool uygulamasında bir kez giriş yapıldıysa Convert Master şifre sormadan açılır; birinde çıkış yapılınca hepsinde çıkış yapılır (yerel veriler korunur; süren dönüştürmede "şimdi / bitince" sorulur). Ortak kimlik Windows Kimlik Bilgisi Yöneticisi'nde. İkinci kez çalıştırma (Master Tool tepsisi) gizli pencereyi gösterir.

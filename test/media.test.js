@@ -70,3 +70,63 @@ test('ses: wav → opus 44.1 kHz isteğini 48 kHz yapar; iptal', async () => {
 test('hatalı tür: sesten video istenirse no_video', async () => {
   await assert.rejects(media.convert({ src: path.join(dir, 'a.wav'), out: path.join(dir, 'x.mp4'), type: 'video', target: 'mp4', options: {} }), (e) => e.code === 'no_video');
 });
+
+test('kalite ve boyut: en-boy oranı hesabı, hazır ayarlar, döndürülmüş telefon videosu', () => {
+  const F = require('../src/formats');
+  assert.deepStrictEqual(F.frameSize({ aspect: '9:16', resolution: '1080' }, 1920, 1080, true), { W: 1080, H: 1920 });
+  assert.deepStrictEqual(F.frameSize({ aspect: '4:5', size: '1080' }, 4000, 3000), { W: 1080, H: 1350 });
+  assert.deepStrictEqual(F.frameSize({ aspect: '16:9', resolution: 'source', rotate: '90' }, 1080, 1920, true), { W: 1920, H: 1080 });
+  assert.deepStrictEqual(F.frameSize({ aspect: 'custom', width: 1001, height: 777 }, 0, 0, true), { W: 1002, H: 778 });
+  assert.strictEqual(F.frameSize({ aspect: 'source' }, 100, 100), null);
+  const web = F.applyPreset('image', { ...F.defaultOptions().image, aspect: '1:1', size: '400' }, 'web');
+  assert.strictEqual(web.aspect, 'source');
+  assert.strictEqual(web.maxWidth, 1920);
+  assert.strictEqual(F.applyPreset('video', F.defaultOptions().video, 'reels').padColor, 'blur');
+  const p = media.parseProbe(`  Stream #0:0[0x1](und): Video: h264 (High), yuv420p(tv, bt709), 1920x1080, 30 fps
+      Side data:
+        displaymatrix: rotation of -90.00 degrees`);
+  assert.strictEqual(p.video.width, 1080);
+  assert.strictEqual(p.video.height, 1920);
+});
+
+test('kalite ve boyut: video dikey/kare/özel boyut, resim kırp/bulanık/saydam/döndür', async () => {
+  const F = require('../src/formats');
+  const src = path.join(dir, 'wide.mp4');
+  await ff(['-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', src]);
+  const dv = F.defaultOptions().video;
+  const vcases = [
+    [{ ...dv, aspect: '9:16', resolution: '360', fit: 'pad', padColor: 'blur', speed: 'veryfast' }, 'mp4', '360x640'],
+    [{ ...dv, aspect: '1:1', resolution: '240', fit: 'crop' }, 'webm', '240x240'],
+    [{ ...dv, aspect: 'custom', width: 301, height: 199, fit: 'stretch' }, 'avi', '302x200'],
+    [{ ...dv, rotate: '90' }, 'mp4', '360x640'],
+    [{ ...dv, aspect: '4:5', resolution: '240', fit: 'pad', padColor: 'white' }, 'gif', '240x300'],
+  ];
+  for (const [o, ext, want] of vcases) {
+    const out = path.join(dir, 'f', `v-${want}.${ext}`);
+    await media.convert({ src, out, type: 'video', target: ext, options: { video: o } });
+    const i = await media.probe(out);
+    assert.strictEqual(`${i.video.width}x${i.video.height}`, want, `${ext} ${o.aspect}`);
+  }
+  const img = path.join(dir, 'pic.png');
+  await ff(['-f', 'lavfi', '-i', 'testsrc2=size=800x600', '-frames:v', '1', img]);
+  const bmp = path.join(dir, 'pic.bmp');
+  await ff(['-i', img, bmp]);
+  const di = F.defaultOptions().image;
+  const icases = [
+    [F.applyPreset('image', di, 'igportrait'), 'jpg', img, '1080x1350'],
+    [{ ...di, aspect: '9:16', size: '360', fit: 'pad', padColor: 'blur' }, 'webp', img, '360x640'],
+    [{ ...di, aspect: '16:9', size: '180', fit: 'pad', padColor: 'transparent' }, 'png', img, '320x180'],
+    [{ ...di, rotate: '270' }, 'png', img, '600x800'],
+    [{ ...di, aspect: '1:1', size: '128', fit: 'pad', padColor: 'black' }, 'bmp', bmp, '128x128'],
+  ];
+  for (const [o, ext, s, want] of icases) {
+    const out = path.join(dir, 'f', `i-${want}.${ext}`);
+    await media.convert({ src: s, out, type: 'image', target: ext, options: { image: o } });
+    const i = await media.probe(out);
+    assert.strictEqual(`${i.video.width}x${i.video.height}`, want, `${ext} ${o.aspect}`);
+  }
+  // Saydam dolgu: köşe pikseli tamamen saydam
+  const { data, info } = await require('sharp')(path.join(dir, 'f', 'i-320x180.png')).raw().toBuffer({ resolveWithObject: true });
+  assert.strictEqual(info.channels, 4);
+  assert.strictEqual(data[3], 0);
+});

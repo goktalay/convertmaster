@@ -629,6 +629,19 @@ const num = (v, def, min, max) => {
 };
 const oneOf = (v, list, def) => (list.includes(v) ? v : def);
 
+// En-boy oranı, sığdırma, döndürme ve hazır ayar (video ve resim ortak)
+function frameOptions(x, d, padColors, presets) {
+  return {
+    preset: oneOf(x.preset, ['custom', ...presets.map((p) => p.id)], 'custom'),
+    aspect: oneOf(x.aspect, FORMATS.ASPECTS, d.aspect),
+    fit: oneOf(x.fit, FORMATS.FITS, d.fit),
+    padColor: oneOf(x.padColor, padColors, d.padColor),
+    width: num(x.width, d.width, 16, 8192),
+    height: num(x.height, d.height, 16, 8192),
+    rotate: oneOf(String(x.rotate), FORMATS.ROTATIONS, d.rotate),
+  };
+}
+
 function cleanOptions(o = {}) {
   const d = FORMATS.defaultOptions();
   const v = o.video || {};
@@ -643,12 +656,15 @@ function cleanOptions(o = {}) {
       speed: oneOf(v.speed, ['veryfast', 'fast', 'medium', 'slow'], d.video.speed),
       audioBitrate: oneOf(String(v.audioBitrate), FORMATS.AUDIO_BITRATES, d.video.audioBitrate),
       noAudio: !!v.noAudio,
+      ...frameOptions(v, d.video, ['black', 'white', 'blur'], FORMATS.PRESETS.video),
     },
     image: {
       quality: num(i.quality, d.image.quality, 1, 100),
       maxWidth: num(i.maxWidth, 0, 0, 20000),
       maxHeight: num(i.maxHeight, 0, 0, 20000),
       keepMeta: !!i.keepMeta,
+      size: oneOf(String(i.size), FORMATS.IMAGE_SIZES, d.image.size),
+      ...frameOptions(i, d.image, FORMATS.PAD_COLORS, FORMATS.PRESETS.image),
     },
     audio: {
       bitrate: oneOf(String(a.bitrate), FORMATS.AUDIO_BITRATES, d.audio.bitrate),

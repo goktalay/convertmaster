@@ -60,6 +60,64 @@
   const AUDIO_BITRATES = ['64', '96', '128', '160', '192', '256', '320'];
   const SAMPLE_RATES = ['source', '48000', '44100', '32000', '22050', '16000'];
 
+  // Kalite ve boyut: en-boy oranı, sığdırma, döndürme ve hazır ayarlar (video ve resim)
+  const ASPECTS = ['source', '16:9', '9:16', '1:1', '4:5', '4:3', '3:4', '21:9', 'custom'];
+  const FITS = ['pad', 'crop', 'stretch'];
+  const PAD_COLORS = ['black', 'white', 'blur', 'transparent']; // saydam yalnız resimde
+  const ROTATIONS = ['0', '90', '270', '180'];
+  const IMAGE_SIZES = ['source', '3840', '2160', '1440', '1080', '720', '480', '400'];
+
+  // Çıktı karesi (W×H). aspect "source" ise null (yalnız sınırla/küçült). Kısa kenar: video'da resolution,
+  // resimde size; "source" ise kaynağın kısa kenarı. even: video kodlayıcıları çift boyut ister.
+  function frameSize(o, sw, sh, even) {
+    if (!o || !o.aspect || o.aspect === 'source') return null;
+    const rot = Number(o.rotate) || 0;
+    if (rot === 90 || rot === 270) [sw, sh] = [sh, sw];
+    const fix = (n) => (even ? Math.max(2, Math.round(n / 2) * 2) : Math.max(1, Math.round(n)));
+    if (o.aspect === 'custom') {
+      const W = Number(o.width) || 0;
+      const H = Number(o.height) || 0;
+      return W && H ? { W: fix(W), H: fix(H) } : null;
+    }
+    const [a, b] = o.aspect.split(':').map(Number);
+    const key = o.resolution !== undefined ? o.resolution : o.size;
+    let short = key && key !== 'source' ? Number(key) : Math.min(sw || 0, sh || 0);
+    if (!short) short = 1080;
+    return a >= b ? { W: fix(short * a / b), H: fix(short) } : { W: fix(short), H: fix(short * b / a) };
+  }
+
+  // Hazır ayarlar: seçilince ilgili alanları doldurur (sonra elle değiştirilebilir)
+  const PRESET_BASE = {
+    video: { aspect: 'source', fit: 'pad', padColor: 'black' },
+    image: { aspect: 'source', size: 'source', fit: 'crop', padColor: 'white', maxWidth: 0, maxHeight: 0 },
+  };
+  const PRESETS = {
+    video: [
+      { id: 'youtube', o: { aspect: '16:9', resolution: '1080', fit: 'pad', padColor: 'black', quality: 'medium', fps: 'source' } },
+      { id: 'youtube4k', o: { aspect: '16:9', resolution: '2160', fit: 'pad', padColor: 'black', quality: 'high', fps: 'source' } },
+      { id: 'reels', o: { aspect: '9:16', resolution: '1080', fit: 'pad', padColor: 'blur', quality: 'medium', fps: '30' } },
+      { id: 'igpost', o: { aspect: '4:5', resolution: '1080', fit: 'pad', padColor: 'blur', quality: 'medium', fps: '30' } },
+      { id: 'square', o: { aspect: '1:1', resolution: '1080', fit: 'pad', padColor: 'blur', quality: 'medium', fps: '30' } },
+      { id: 'whatsapp', o: { resolution: '720', quality: 'low', fps: '30', audioBitrate: '128' } },
+      { id: 'email', o: { resolution: '480', quality: 'low', fps: '25', audioBitrate: '96' } },
+      { id: 'archive', o: { resolution: 'source', quality: 'high', fps: 'source', speed: 'slow', audioBitrate: '256' } },
+    ],
+    image: [
+      { id: 'igsquare', o: { aspect: '1:1', size: '1080', fit: 'crop', quality: 90 } },
+      { id: 'igportrait', o: { aspect: '4:5', size: '1080', fit: 'crop', quality: 90 } },
+      { id: 'story', o: { aspect: '9:16', size: '1080', fit: 'pad', padColor: 'blur', quality: 90 } },
+      { id: 'ytthumb', o: { aspect: '16:9', size: '720', fit: 'crop', quality: 90 } },
+      { id: 'profile', o: { aspect: '1:1', size: '400', fit: 'crop', quality: 90 } },
+      { id: 'web', o: { maxWidth: 1920, quality: 80 } },
+      { id: 'small', o: { maxWidth: 1280, maxHeight: 1280, quality: 70 } },
+    ],
+  };
+  function applyPreset(type, cur, id) {
+    const pr = (PRESETS[type] || []).find((x) => x.id === id);
+    if (!pr) return { ...cur, preset: 'custom' };
+    return { ...cur, ...PRESET_BASE[type], ...pr.o, preset: id };
+  }
+
   const extOf = (p) => {
     const m = /\.([^./\\]+)$/.exec(String(p || ''));
     return m ? m[1].toLowerCase() : '';
@@ -73,8 +131,10 @@
   // Bir proje için varsayılan dönüştürme seçenekleri
   function defaultOptions() {
     return {
-      video: { quality: 'medium', resolution: 'source', fps: 'source', codec: 'h264', speed: 'medium', audioBitrate: '192', noAudio: false },
-      image: { quality: 85, maxWidth: 0, maxHeight: 0, keepMeta: false },
+      video: { preset: 'custom', quality: 'medium', resolution: 'source', fps: 'source', codec: 'h264', speed: 'medium', audioBitrate: '192', noAudio: false,
+        aspect: 'source', fit: 'pad', padColor: 'black', width: 1920, height: 1080, rotate: '0' },
+      image: { preset: 'custom', quality: 85, maxWidth: 0, maxHeight: 0, keepMeta: false,
+        aspect: 'source', size: 'source', fit: 'crop', padColor: 'white', width: 1080, height: 1080, rotate: '0' },
       audio: { bitrate: '192', sampleRate: 'source', channels: 'source' },
     };
   }
@@ -88,7 +148,7 @@
     return { enabled: false, languages: ['tur', 'eng'] };
   }
 
-  const api = { TYPES, SPEECH_MODELS, SPEECH_LANGS, OCR_LANGS, OCR_ISO, defaultOcr, QUALITY, RESOLUTIONS, FPS, AUDIO_BITRATES, SAMPLE_RATES, extOf, typeOfExt, defaultOptions, defaultSpeech };
+  const api = { TYPES, SPEECH_MODELS, SPEECH_LANGS, OCR_LANGS, OCR_ISO, defaultOcr, QUALITY, RESOLUTIONS, FPS, AUDIO_BITRATES, ASPECTS, FITS, PAD_COLORS, ROTATIONS, IMAGE_SIZES, PRESETS, frameSize, applyPreset, SAMPLE_RATES, extOf, typeOfExt, defaultOptions, defaultSpeech };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FORMATS = api;
 })(typeof self !== 'undefined' ? self : this);
